@@ -2,4 +2,4 @@
 set -eu
 
 echo "[ArkmeDemo] running pnpm verify:answer before push..."
-pnpm verify:answer
+"C:/nvm4w/nodejs/pnpm.CMD" verify:answer

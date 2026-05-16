@@ -9,6 +9,9 @@ import type {
 
 export const arrangementsStorageKey = "arkme-demo.arrangements";
 export const arrangementsStorageEvent = "arkme-demo:arrangements-updated";
+export const arrangementCandidatesStorageKey = "arkme-demo.arrangementCandidates";
+export const arrangementCandidatesStorageEvent =
+  "arkme-demo:arrangement-candidates-updated";
 
 export type ManualArrangementInput = {
   title: string;
@@ -19,6 +22,28 @@ export type ManualArrangementInput = {
 };
 
 export type ArrangementTimePreset = "none" | "today" | "tomorrow" | "weekend";
+export type ArrangementCandidateStatus = "pending" | "confirmed" | "ignored";
+
+export type ArrangementCandidate = {
+  id: string;
+  title: string;
+  note?: string;
+  sourceType: ArrangementSourceType;
+  sourceRef: ArrangementSourceRef;
+  status: ArrangementCandidateStatus;
+  confidence?: number;
+  reason?: string;
+  createdBy: "validation" | "ai";
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type ArrangementSourceDraft = {
+  title: string;
+  note?: string;
+  sourceType: ArrangementSourceType;
+  sourceRef: ArrangementSourceRef;
+};
 
 function readJsonValue(key: string): unknown {
   if (typeof window === "undefined") return null;
@@ -82,6 +107,10 @@ function isArrangementAiCapability(value: unknown): value is ArrangementAiCapabi
   return value === "userOnly" || value === "aiAssist" || value === "aiExecutable";
 }
 
+function isArrangementCandidateStatus(value: unknown): value is ArrangementCandidateStatus {
+  return value === "pending" || value === "confirmed" || value === "ignored";
+}
+
 function normalizeSourceRef(value: unknown, index: number): ArrangementSourceRef | null {
   if (!value || typeof value !== "object") return null;
 
@@ -103,6 +132,42 @@ function normalizeSourceRef(value: unknown, index: number): ArrangementSourceRef
     ...(normalizeText(sourceRef.messageId)
       ? { messageId: normalizeText(sourceRef.messageId) }
       : {}),
+  };
+}
+
+export function normalizeArrangementCandidate(
+  value: unknown,
+  index: number
+): ArrangementCandidate | null {
+  if (!value || typeof value !== "object") return null;
+
+  const candidate = value as Partial<ArrangementCandidate>;
+  const title = normalizeText(candidate.title);
+  const sourceRef = normalizeSourceRef(candidate.sourceRef, index);
+  const sourceType = isArrangementSourceType(candidate.sourceType)
+    ? candidate.sourceType
+    : sourceRef?.type ?? "manual";
+  if (!title || !sourceRef) return null;
+
+  const status = isArrangementCandidateStatus(candidate.status)
+    ? candidate.status
+    : "pending";
+  const createdBy = candidate.createdBy === "ai" ? "ai" : "validation";
+
+  return {
+    id: normalizeText(candidate.id) || `candidate-${index}`,
+    title,
+    ...(normalizeText(candidate.note) ? { note: normalizeText(candidate.note) } : {}),
+    sourceType,
+    sourceRef,
+    status,
+    ...(typeof candidate.confidence === "number" && Number.isFinite(candidate.confidence)
+      ? { confidence: Math.min(1, Math.max(0, candidate.confidence)) }
+      : {}),
+    ...(normalizeText(candidate.reason) ? { reason: normalizeText(candidate.reason) } : {}),
+    createdBy,
+    createdAt: normalizeTimestamp(candidate.createdAt, Date.now() + index),
+    updatedAt: normalizeTimestamp(candidate.updatedAt, Date.now() + index),
   };
 }
 
@@ -180,14 +245,108 @@ export function getInitialArrangements() {
   return getDemoArrangements();
 }
 
+export function getInitialArrangementCandidates() {
+  const parsedValue = readJsonValue(arrangementCandidatesStorageKey);
+  if (!Array.isArray(parsedValue)) return [];
+
+  return parsedValue
+    .map(normalizeArrangementCandidate)
+    .filter((candidate): candidate is ArrangementCandidate => Boolean(candidate));
+}
+
 export function persistArrangements(arrangements: ArrangementItem[]) {
   writeJsonValue(arrangementsStorageKey, arrangements);
   notifyArrangementsChange();
 }
 
+export function persistArrangementCandidates(candidates: ArrangementCandidate[]) {
+  writeJsonValue(arrangementCandidatesStorageKey, candidates);
+  notifyArrangementCandidatesChange();
+}
+
 export function notifyArrangementsChange() {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new Event(arrangementsStorageEvent));
+}
+
+export function notifyArrangementCandidatesChange() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(arrangementCandidatesStorageEvent));
+}
+
+function getSourceRefKey(sourceRef: ArrangementSourceRef) {
+  return sourceRef.messageId || sourceRef.id;
+}
+
+export function createArrangementCandidateFromSourceDraft(
+  draft: ArrangementSourceDraft
+): ArrangementCandidate {
+  const timestamp = Date.now();
+  const title = draft.title.trim();
+
+  return {
+    id: `candidate-${draft.sourceRef.type}-${getSourceRefKey(draft.sourceRef)}`,
+    title,
+    ...(draft.note?.trim() ? { note: draft.note.trim() } : {}),
+    sourceType: draft.sourceType,
+    sourceRef: draft.sourceRef,
+    status: "pending",
+    createdBy: "validation",
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+export function saveArrangementCandidateFromSourceDraft(
+  draft: ArrangementSourceDraft
+): ArrangementCandidate {
+  const currentCandidates = getInitialArrangementCandidates();
+  const candidate = createArrangementCandidateFromSourceDraft(draft);
+  const sourceKey = getSourceRefKey(candidate.sourceRef);
+  const existingIndex = currentCandidates.findIndex(
+    (item) => getSourceRefKey(item.sourceRef) === sourceKey
+  );
+
+  if (existingIndex < 0) {
+    persistArrangementCandidates([candidate, ...currentCandidates]);
+    return candidate;
+  }
+
+  const existingCandidate = currentCandidates[existingIndex];
+  if (
+    existingCandidate.status === "pending" ||
+    existingCandidate.status === "confirmed"
+  ) {
+    return existingCandidate;
+  }
+
+  const restoredCandidate: ArrangementCandidate = {
+    ...existingCandidate,
+    title: candidate.title,
+    note: candidate.note,
+    sourceType: candidate.sourceType,
+    sourceRef: candidate.sourceRef,
+    status: "pending",
+    updatedAt: Date.now(),
+  };
+  const nextCandidates = currentCandidates.map((item, index) =>
+    index === existingIndex ? restoredCandidate : item
+  );
+  persistArrangementCandidates(nextCandidates);
+  return restoredCandidate;
+}
+
+export function updateArrangementCandidateStatus(
+  id: string,
+  status: ArrangementCandidateStatus
+) {
+  const nextCandidates = getInitialArrangementCandidates().map((candidate) =>
+    candidate.id === id
+      ? { ...candidate, status, updatedAt: Date.now() }
+      : candidate
+  );
+  persistArrangementCandidates(nextCandidates);
+  return nextCandidates;
 }
 
 export function createManualArrangement(input: ManualArrangementInput): ArrangementItem {
@@ -215,6 +374,31 @@ export function createManualArrangement(input: ManualArrangementInput): Arrangem
     ],
     aiCapability: "userOnly",
     attentionScore: input.timePreset === "none" ? 20 : 50,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+export function createArrangementFromCandidate(
+  candidate: ArrangementCandidate,
+  input: ManualArrangementInput
+): ArrangementItem {
+  const timestamp = Date.now();
+  const timeFields = getArrangementTimeFieldsForPreset(input.timePreset, timestamp);
+  const title = input.title.trim();
+
+  return {
+    id: `arrangement-${timestamp}-${Math.random().toString(36).slice(2, 7)}`,
+    title,
+    ...(input.note?.trim() ? { note: input.note.trim() } : {}),
+    status: "active",
+    ...timeFields,
+    ...(input.location?.trim() ? { location: input.location.trim() } : {}),
+    people: splitPeople(input.people),
+    sourceType: candidate.sourceType,
+    sourceRefs: [candidate.sourceRef],
+    aiCapability: candidate.createdBy === "ai" ? "aiAssist" : "userOnly",
+    attentionScore: input.timePreset === "none" ? 30 : 60,
     createdAt: timestamp,
     updatedAt: timestamp,
   };

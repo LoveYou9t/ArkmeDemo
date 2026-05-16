@@ -350,7 +350,7 @@ function getEditorFormFromArrangement(arrangement: ArrangementItem): EditorForm;
 
 - **Contextual Value:** Third-stage interaction layer for editing existing arrangements and filtering local arrangements before adding AI-generated or message-derived arrangement flows.
 
-### Arrangement Compact Search And Source Panels Plan
+### Arrangement Compact Search And Source Dropdown
 
 - **File Location:** `src/pages/Arrangements.tsx`
 - **Core Signature:**
@@ -363,13 +363,108 @@ type ArrangementSearchPanelProps = {
   onCloseSearch: () => void;
 };
 
-type ArrangementSourceFilterPanelProps = {
+type ArrangementSourceDropdownProps = {
   sourceFilter: ArrangementSourceFilter;
   showSourceFilters: boolean;
   onSourceFilterChange: (value: ArrangementSourceFilter) => void;
   onToggleSourceFilters: () => void;
-  onCloseSourceFilters: () => void;
+};
+
+type ArrangementListSectionProps = {
+  title: string;
+  arrangements: ArrangementItem[];
+  sourceFilter: ArrangementSourceFilter;
+  showSourceFilters: boolean;
+  hasActiveListFilters: boolean;
 };
 ```
 
-- **Contextual Value:** Planned compact control surface where the search button lives in the header next to the create button, while source filtering becomes an expandable panel that does not permanently consume mobile first-screen space.
+- **Contextual Value:** Compact control surface where the search button lives in the header next to the create button, while source filtering is anchored to the arrangement list title as a right-aligned dropdown that remains available even when filters return no list results.
+
+### SearchIcon
+
+- **File Location:** `src/components/SearchIcon.tsx`
+- **Core Signature:**
+
+```tsx
+export default function SearchIcon({
+  className = "h-6 w-6",
+}: {
+  className?: string;
+}): JSX.Element;
+```
+
+- **Contextual Value:** Shared quick-note search icon now reused by arrangements so search entry styling stays consistent while color continues to inherit from surrounding theme text utilities.
+
+### Arrangement Candidate Data Layer
+
+- **File Location:** `src/data/arrangements.ts`
+- **Core Signature:**
+
+```ts
+type ArrangementCandidateStatus = "pending" | "confirmed" | "ignored";
+
+type ArrangementCandidate = {
+  id: string;
+  title: string;
+  note?: string;
+  sourceType: ArrangementSourceType;
+  sourceRef: ArrangementSourceRef;
+  status: ArrangementCandidateStatus;
+  createdBy: "validation" | "ai";
+  createdAt: number;
+  updatedAt: number;
+};
+
+type ArrangementSourceDraft = {
+  title: string;
+  note?: string;
+  sourceType: ArrangementSourceType;
+  sourceRef: ArrangementSourceRef;
+};
+
+function createArrangementCandidateFromSourceDraft(
+  draft: ArrangementSourceDraft
+): ArrangementCandidate;
+
+function saveArrangementCandidateFromSourceDraft(
+  draft: ArrangementSourceDraft
+): ArrangementCandidate;
+
+function createArrangementFromCandidate(
+  candidate: ArrangementCandidate,
+  input: ManualArrangementInput
+): ArrangementItem;
+```
+
+- **Contextual Value:** Fourth-stage validation queue that lets quick notes and test messages become confirmable arrangement candidates before being converted into official `ArrangementItem` records.
+
+### Arrangement AI Recognition Service Plan
+
+- **File Location:** `docs/arrangements-real-ai-integration-plan.md`
+- **Core Signature:**
+
+```ts
+type AiArrangementCandidateDraft = {
+  title: string;
+  note?: string;
+  confidence?: number;
+  reason?: string;
+};
+
+type RecognizeArrangementCandidatesInput = {
+  sourceDraft: ArrangementSourceDraft;
+  locale?: "zh-CN" | "en-US";
+};
+
+async function recognizeArrangementCandidates(
+  input: RecognizeArrangementCandidatesInput
+): Promise<{ candidates: AiArrangementCandidateDraft[]; rawText?: string }>;
+
+function createArrangementCandidateFromAiDraft(
+  draft: AiArrangementCandidateDraft,
+  sourceDraft: ArrangementSourceDraft
+): ArrangementCandidate;
+```
+
+- **Contextual Value:** Planned service boundary for real AI arrangement extraction that can feed the existing candidate queue without changing the official `ArrangementItem` model or confirmation UI.

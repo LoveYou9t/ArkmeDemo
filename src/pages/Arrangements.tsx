@@ -1,11 +1,18 @@
 import React from "react";
 import EmptyState from "@/components/EmptyState";
+import SearchIcon from "@/components/SearchIcon";
 import {
+  arrangementCandidatesStorageEvent,
+  arrangementsStorageEvent,
+  createArrangementFromCandidate,
   createManualArrangement,
   getArrangementTimeFieldsForPreset,
+  getInitialArrangementCandidates,
   getInitialArrangements,
   getSourceTypeLabel,
   persistArrangements,
+  updateArrangementCandidateStatus,
+  type ArrangementCandidate,
   type ArrangementTimePreset,
 } from "@/data/arrangements";
 import { formatTimeLabel } from "@/lib/time";
@@ -13,13 +20,14 @@ import { cn } from "@/lib/utils";
 import type {
   ArrangementAiCapability,
   ArrangementItem,
+  ArrangementSourceRef,
   ArrangementSourceType,
   ArrangementStatus,
 } from "@/types/arrangement";
 
 type ArrangementFilter = "all" | "near" | "later" | "done";
 type ArrangementSourceFilter = "all" | ArrangementSourceType;
-type EditorMode = "create" | "edit";
+type EditorMode = "create" | "edit" | "confirm";
 
 type EditorForm = {
   title: string;
@@ -53,19 +61,57 @@ const emptyEditorForm: EditorForm = {
   note: "",
 };
 
-export default function Arrangements() {
+type ArrangementsProps = {
+  onOpenCandidateSource?: (sourceRef: ArrangementSourceRef) => void;
+};
+
+export default function Arrangements({ onOpenCandidateSource }: ArrangementsProps) {
   const [arrangements, setArrangements] = React.useState(getInitialArrangements);
+  const [candidates, setCandidates] = React.useState(getInitialArrangementCandidates);
   const [activeFilter, setActiveFilter] = React.useState<ArrangementFilter>("all");
   const [searchQuery, setSearchQuery] = React.useState("");
   const [sourceFilter, setSourceFilter] = React.useState<ArrangementSourceFilter>("all");
+  const [showSearchBar, setShowSearchBar] = React.useState(false);
+  const [showSourceFilters, setShowSourceFilters] = React.useState(false);
   const [selectedArrangementId, setSelectedArrangementId] = React.useState<string | null>(null);
   const [showEditor, setShowEditor] = React.useState(false);
   const [editingArrangementId, setEditingArrangementId] = React.useState<string | null>(null);
+  const [confirmingCandidateId, setConfirmingCandidateId] = React.useState<string | null>(null);
 
   const selectedArrangement =
     arrangements.find((arrangement) => arrangement.id === selectedArrangementId) ?? null;
   const editingArrangement =
     arrangements.find((arrangement) => arrangement.id === editingArrangementId) ?? null;
+  const confirmingCandidate =
+    candidates.find((candidate) => candidate.id === confirmingCandidateId) ?? null;
+  const pendingCandidates = React.useMemo(
+    () => candidates.filter((candidate) => candidate.status === "pending"),
+    [candidates]
+  );
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const refreshArrangements = () => setArrangements(getInitialArrangements());
+    const refreshCandidates = () => setCandidates(getInitialArrangementCandidates());
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === null || event.key === "arkme-demo.arrangements") {
+        refreshArrangements();
+      }
+      if (event.key === null || event.key === "arkme-demo.arrangementCandidates") {
+        refreshCandidates();
+      }
+    };
+
+    window.addEventListener("storage", handleStorage);
+    window.addEventListener(arrangementsStorageEvent, refreshArrangements);
+    window.addEventListener(arrangementCandidatesStorageEvent, refreshCandidates);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener(arrangementsStorageEvent, refreshArrangements);
+      window.removeEventListener(arrangementCandidatesStorageEvent, refreshCandidates);
+    };
+  }, []);
 
   const visibleArrangements = React.useMemo(
     () =>
@@ -149,6 +195,22 @@ export default function Arrangements() {
     setEditingArrangementId(null);
   };
 
+  const handleConfirmCandidate = (form: EditorForm) => {
+    if (!confirmingCandidate) return;
+    const nextArrangement = createArrangementFromCandidate(confirmingCandidate, form);
+    updateArrangements((current) => [nextArrangement, ...current]);
+    const nextCandidates = updateArrangementCandidateStatus(confirmingCandidate.id, "confirmed");
+    setCandidates(nextCandidates);
+    setConfirmingCandidateId(null);
+    setActiveFilter("all");
+  };
+
+  const handleIgnoreCandidate = (candidate: ArrangementCandidate) => {
+    const nextCandidates = updateArrangementCandidateStatus(candidate.id, "ignored");
+    setCandidates(nextCandidates);
+    if (confirmingCandidateId === candidate.id) setConfirmingCandidateId(null);
+  };
+
   const handleComplete = (arrangement: ArrangementItem) => {
     patchArrangement(arrangement.id, {
       status: "done",
@@ -188,19 +250,52 @@ export default function Arrangements() {
               未来的事，轻一点放在这
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowEditor(true)}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-[24px] font-light leading-none text-on-primary shadow-soft transition active:scale-[0.96]"
-            aria-label="新增安排"
-          >
-            +
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowSearchBar((value) => !value)}
+              className={cn(
+                "flex h-9 w-9 items-center justify-center rounded-[8px] text-text-tertiary transition hover:bg-hover-overlay active:scale-[0.96]",
+                (showSearchBar || searchQuery.trim()) && "text-primary"
+              )}
+              aria-label="搜索安排"
+            >
+              <SearchIcon className="h-6 w-6" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowEditor(true)}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-[24px] font-light leading-none text-on-primary shadow-soft transition active:scale-[0.96]"
+              aria-label="新增安排"
+            >
+              +
+            </button>
+          </div>
         </div>
+        {!showSearchBar && searchQuery.trim() && (
+          <div className="mt-2 flex items-center gap-2 text-[12px] leading-5 text-text-tertiary">
+            <span className="min-w-0 flex-1 truncate">搜索：{searchQuery.trim()}</span>
+            <button
+              type="button"
+              onClick={() => setSearchQuery("")}
+              className="shrink-0 text-primary"
+            >
+              清除
+            </button>
+          </div>
+        )}
       </header>
 
       <main className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-        <ArrangementSearchBar value={searchQuery} onChange={setSearchQuery} />
+        <ArrangementSearchPanel
+          searchQuery={searchQuery}
+          showSearchBar={showSearchBar}
+          onSearchQueryChange={setSearchQuery}
+          onCloseSearch={() => {
+            setSearchQuery("");
+            setShowSearchBar(false);
+          }}
+        />
 
         <TodaySpotlightSection
           arrangements={todaySpotlightArrangements}
@@ -215,7 +310,12 @@ export default function Arrangements() {
           onCreate={() => setShowEditor(true)}
         />
 
-        <ArrangementSourceFilterBar value={sourceFilter} onChange={setSourceFilter} />
+        <ArrangementCandidateSection
+          candidates={pendingCandidates}
+          onConfirm={(candidate) => setConfirmingCandidateId(candidate.id)}
+          onIgnore={handleIgnoreCandidate}
+          onOpenSource={onOpenCandidateSource}
+        />
 
         <div className="sticky top-0 z-10 -mx-4 mt-3 bg-bg px-4 pb-2 pt-2">
           <div className="grid grid-cols-4 gap-1 rounded-[12px] bg-surface p-1">
@@ -225,7 +325,10 @@ export default function Arrangements() {
                 <button
                   key={filter.key}
                   type="button"
-                  onClick={() => setActiveFilter(filter.key)}
+                  onClick={() => {
+                    setActiveFilter(filter.key);
+                    setShowSourceFilters(false);
+                  }}
                   className={cn(
                     "h-8 rounded-[9px] text-[12px] font-medium transition active:scale-[0.98]",
                     active
@@ -240,50 +343,28 @@ export default function Arrangements() {
           </div>
         </div>
 
-        {visibleArrangements.length > 0 ? (
-          <section className="space-y-3">
-            <ArrangementGroup
-              title={getGroupTitle(activeFilter)}
-              arrangements={visibleArrangements}
-              onOpen={(arrangement) => setSelectedArrangementId(arrangement.id)}
-              onComplete={handleComplete}
-              onRestore={handleRestore}
-            />
-          </section>
-        ) : (
-          <div className="flex min-h-[300px] items-center justify-center">
-            <EmptyState
-              title={searchQuery.trim() || sourceFilter !== "all" ? "没有匹配的安排" : "这里还没有安排"}
-              description={
-                searchQuery.trim() || sourceFilter !== "all"
-                  ? "换个关键词或来源试试。"
-                  : "把接下来可能要做的事先放进来，不确定时间也没关系。"
-              }
-              action={
-                searchQuery.trim() || sourceFilter !== "all" ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSearchQuery("");
-                      setSourceFilter("all");
-                    }}
-                    className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-on-primary transition active:scale-[0.98]"
-                  >
-                    清除筛选
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setShowEditor(true)}
-                    className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-on-primary transition active:scale-[0.98]"
-                  >
-                    新增安排
-                  </button>
-                )
-              }
-            />
-          </div>
-        )}
+        <ArrangementListSection
+          title={getGroupTitle(activeFilter)}
+          arrangements={visibleArrangements}
+          sourceFilter={sourceFilter}
+          showSourceFilters={showSourceFilters}
+          hasActiveListFilters={Boolean(searchQuery.trim()) || sourceFilter !== "all"}
+          onSourceFilterChange={(value) => {
+            setSourceFilter(value);
+            setShowSourceFilters(false);
+          }}
+          onToggleSourceFilters={() => setShowSourceFilters((value) => !value)}
+          onOpen={(arrangement) => setSelectedArrangementId(arrangement.id)}
+          onComplete={handleComplete}
+          onRestore={handleRestore}
+          onClearFilters={() => {
+            setSearchQuery("");
+            setSourceFilter("all");
+            setShowSearchBar(false);
+            setShowSourceFilters(false);
+          }}
+          onCreate={() => setShowEditor(true)}
+        />
       </main>
 
       <ArrangementDetailSheet
@@ -310,7 +391,89 @@ export default function Arrangements() {
           onSubmit={handleEditArrangement}
         />
       )}
+      {confirmingCandidate && (
+        <ArrangementEditorSheet
+          mode="confirm"
+          initialValue={getEditorFormFromCandidate(confirmingCandidate)}
+          onClose={() => setConfirmingCandidateId(null)}
+          onSubmit={handleConfirmCandidate}
+        />
+      )}
     </div>
+  );
+}
+
+function ArrangementCandidateSection({
+  candidates,
+  onConfirm,
+  onIgnore,
+  onOpenSource,
+}: {
+  candidates: ArrangementCandidate[];
+  onConfirm: (candidate: ArrangementCandidate) => void;
+  onIgnore: (candidate: ArrangementCandidate) => void;
+  onOpenSource?: (sourceRef: ArrangementSourceRef) => void;
+}) {
+  if (candidates.length === 0) return null;
+
+  return (
+    <section className="mt-3">
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="text-[13px] font-semibold leading-5 text-text-muted">
+          可能是安排
+        </h2>
+        <span className="text-[11px] leading-4 text-text-tertiary">
+          {candidates.length} 条候选
+        </span>
+      </div>
+      <div className="space-y-2">
+        {candidates.map((candidate) => (
+          <article
+            key={candidate.id}
+            className="rounded-[12px] border border-[var(--record-card-border)] bg-surface px-3 py-3 shadow-[var(--mine-card-shadow)]"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <h3 className="min-w-0 text-[15px] font-semibold leading-5 text-text">
+                {candidate.title}
+              </h3>
+              <StatusPill label={getSourceTypeLabel(candidate.sourceType)} tone="muted" />
+            </div>
+            {candidate.note && (
+              <p className="mt-1 line-clamp-2 text-[12px] leading-5 text-text-tertiary">
+                {candidate.note}
+              </p>
+            )}
+            <p className="mt-2 line-clamp-2 text-[13px] leading-5 text-text-muted">
+              {candidate.sourceRef.excerpt}
+            </p>
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => onConfirm(candidate)}
+                className="h-9 rounded-[11px] bg-primary text-[13px] font-medium text-on-primary transition active:scale-[0.98]"
+              >
+                确认
+              </button>
+              <button
+                type="button"
+                onClick={() => onIgnore(candidate)}
+                className="h-9 rounded-[11px] border border-border-light bg-surface text-[13px] font-medium text-text-muted transition hover:bg-hover-overlay active:scale-[0.98]"
+              >
+                忽略
+              </button>
+              <button
+                type="button"
+                onClick={() => onOpenSource?.(candidate.sourceRef)}
+                className="h-9 rounded-[11px] border border-border-light bg-surface text-[13px] font-medium text-text-muted transition hover:bg-hover-overlay active:scale-[0.98] disabled:opacity-45"
+                disabled={!onOpenSource}
+              >
+                查看来源
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -438,91 +601,181 @@ function SpotlightMessage({
   );
 }
 
-function ArrangementSearchBar({
-  value,
-  onChange,
+function ArrangementSearchPanel({
+  searchQuery,
+  showSearchBar,
+  onSearchQueryChange,
+  onCloseSearch,
 }: {
-  value: string;
-  onChange: (value: string) => void;
+  searchQuery: string;
+  showSearchBar: boolean;
+  onSearchQueryChange: (value: string) => void;
+  onCloseSearch: () => void;
 }) {
+  if (!showSearchBar) return null;
+
   return (
     <div className="pb-3 pt-1">
-      <label className="block">
-        <span className="sr-only">搜索安排</span>
-        <input
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          placeholder="搜索安排、地点、相关人"
-          className="h-10 w-full rounded-[12px] border border-transparent bg-surface px-3 text-[13px] text-text shadow-soft outline-none placeholder:text-input-placeholder focus:shadow-[0_0_0_1px_var(--primary-ring),0_0_10px_var(--primary-ring)]"
-        />
-      </label>
-    </div>
-  );
-}
-
-function ArrangementSourceFilterBar({
-  value,
-  onChange,
-}: {
-  value: ArrangementSourceFilter;
-  onChange: (value: ArrangementSourceFilter) => void;
-}) {
-  return (
-    <div className="-mx-4 mt-3 overflow-x-auto px-4 pb-1">
-      <div className="flex w-max gap-1.5">
-        {sourceFilters.map((filter) => {
-          const active = filter.key === value;
-          return (
-            <button
-              key={filter.key}
-              type="button"
-              onClick={() => onChange(filter.key)}
-              className={cn(
-                "h-8 whitespace-nowrap rounded-full px-3 text-[12px] font-medium transition active:scale-[0.98]",
-                active
-                  ? "bg-primary-soft text-primary"
-                  : "bg-surface text-text-tertiary hover:bg-hover-overlay"
-              )}
-            >
-              {filter.label}
-            </button>
-          );
-        })}
+      <div className="flex items-center gap-2">
+        <label className="min-w-0 flex-1">
+          <span className="sr-only">搜索安排</span>
+          <input
+            value={searchQuery}
+            onChange={(event) => onSearchQueryChange(event.target.value)}
+            placeholder="搜索安排、地点、相关人"
+            className="h-10 w-full rounded-[12px] border border-transparent bg-surface px-3 text-[13px] text-text shadow-soft outline-none placeholder:text-input-placeholder focus:shadow-[0_0_0_1px_var(--primary-ring),0_0_10px_var(--primary-ring)]"
+            autoFocus
+          />
+        </label>
+        <button
+          type="button"
+          onClick={onCloseSearch}
+          className="h-10 shrink-0 px-2 text-[13px] font-medium text-text-tertiary transition hover:text-text active:scale-[0.98]"
+        >
+          取消
+        </button>
       </div>
     </div>
   );
 }
 
-function ArrangementGroup({
+function ArrangementSourceDropdown({
+  sourceFilter,
+  showSourceFilters,
+  onSourceFilterChange,
+  onToggleSourceFilters,
+}: {
+  sourceFilter: ArrangementSourceFilter;
+  showSourceFilters: boolean;
+  onSourceFilterChange: (value: ArrangementSourceFilter) => void;
+  onToggleSourceFilters: () => void;
+}) {
+  const currentLabel = getSourceFilterLabel(sourceFilter);
+
+  return (
+    <div className="relative shrink-0">
+      <button
+        type="button"
+        onClick={onToggleSourceFilters}
+        className={cn(
+          "h-7 max-w-[156px] truncate rounded-[8px] px-2 text-right text-[12px] font-medium leading-5 text-text-tertiary transition hover:bg-hover-overlay hover:text-text active:scale-[0.98]",
+          sourceFilter !== "all" && "bg-primary-soft text-primary hover:text-primary"
+        )}
+        aria-expanded={showSourceFilters}
+      >
+        来源：{currentLabel}
+      </button>
+      {showSourceFilters && (
+        <div className="absolute right-0 top-full z-20 mt-1 w-[160px] overflow-hidden rounded-[12px] border border-border-light bg-[var(--dialog-bg)] p-1 shadow-[0_10px_28px_rgba(0,0,0,0.14)]">
+          {sourceFilters.map((filter) => {
+            const active = filter.key === sourceFilter;
+            return (
+              <button
+                key={filter.key}
+                type="button"
+                onClick={() => onSourceFilterChange(filter.key)}
+                className={cn(
+                  "flex h-8 w-full items-center rounded-[9px] px-2 text-left text-[12px] font-medium transition active:scale-[0.98]",
+                  active
+                    ? "bg-primary-soft text-primary"
+                    : "text-text-tertiary hover:bg-hover-overlay hover:text-text"
+                )}
+              >
+                {filter.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ArrangementListSection({
   title,
   arrangements,
+  sourceFilter,
+  showSourceFilters,
+  hasActiveListFilters,
+  onSourceFilterChange,
+  onToggleSourceFilters,
   onOpen,
   onComplete,
   onRestore,
+  onClearFilters,
+  onCreate,
 }: {
   title: string;
   arrangements: ArrangementItem[];
+  sourceFilter: ArrangementSourceFilter;
+  showSourceFilters: boolean;
+  hasActiveListFilters: boolean;
+  onSourceFilterChange: (value: ArrangementSourceFilter) => void;
+  onToggleSourceFilters: () => void;
   onOpen: (arrangement: ArrangementItem) => void;
   onComplete: (arrangement: ArrangementItem) => void;
   onRestore: (arrangement: ArrangementItem) => void;
+  onClearFilters: () => void;
+  onCreate: () => void;
 }) {
   return (
-    <div>
-      <h2 className="mb-2 text-[13px] font-semibold leading-5 text-text-muted">
-        {title}
-      </h2>
-      <div className="space-y-2">
-        {arrangements.map((arrangement) => (
-          <ArrangementCard
-            key={arrangement.id}
-            arrangement={arrangement}
-            onOpen={() => onOpen(arrangement)}
-            onComplete={() => onComplete(arrangement)}
-            onRestore={() => onRestore(arrangement)}
-          />
-        ))}
+    <section className="space-y-3">
+      <div className="relative mb-2 flex items-center justify-between gap-3">
+        <h2 className="min-w-0 flex-1 truncate text-[13px] font-semibold leading-5 text-text-muted">
+          {title}
+        </h2>
+        <ArrangementSourceDropdown
+          sourceFilter={sourceFilter}
+          showSourceFilters={showSourceFilters}
+          onSourceFilterChange={onSourceFilterChange}
+          onToggleSourceFilters={onToggleSourceFilters}
+        />
       </div>
-    </div>
+
+      {arrangements.length > 0 ? (
+        <div className="space-y-2">
+          {arrangements.map((arrangement) => (
+            <ArrangementCard
+              key={arrangement.id}
+              arrangement={arrangement}
+              onOpen={() => onOpen(arrangement)}
+              onComplete={() => onComplete(arrangement)}
+              onRestore={() => onRestore(arrangement)}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="flex min-h-[300px] items-center justify-center">
+          <EmptyState
+            title={hasActiveListFilters ? "没有匹配的安排" : "这里还没有安排"}
+            description={
+              hasActiveListFilters
+                ? "换个关键词或来源试试。"
+                : "把接下来可能要做的事先放进来，不确定时间也没关系。"
+            }
+            action={
+              hasActiveListFilters ? (
+                <button
+                  type="button"
+                  onClick={onClearFilters}
+                  className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-on-primary transition active:scale-[0.98]"
+                >
+                  清除筛选
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onCreate}
+                  className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-on-primary transition active:scale-[0.98]"
+                >
+                  新增安排
+                </button>
+              )
+            }
+          />
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -741,9 +994,16 @@ function ArrangementEditorSheet({
 }) {
   const [form, setForm] = React.useState<EditorForm>(initialValue ?? emptyEditorForm);
   const canSubmit = form.title.trim().length > 0;
-  const title = mode === "edit" ? "编辑安排" : "新增安排";
-  const submitLabel = mode === "edit" ? "保存修改" : "保存安排";
-  const closeLabel = mode === "edit" ? "关闭编辑安排" : "关闭新增安排";
+  const title =
+    mode === "edit" ? "编辑安排" : mode === "confirm" ? "确认候选安排" : "新增安排";
+  const submitLabel =
+    mode === "edit" ? "保存修改" : mode === "confirm" ? "保存为安排" : "保存安排";
+  const closeLabel =
+    mode === "edit"
+      ? "关闭编辑安排"
+      : mode === "confirm"
+        ? "关闭确认候选安排"
+        : "关闭新增安排";
 
   const updateField = <Key extends keyof EditorForm>(key: Key, value: EditorForm[Key]) => {
     setForm((current) => ({ ...current, [key]: value }));
@@ -997,6 +1257,10 @@ function matchesSourceFilter(
   );
 }
 
+function getSourceFilterLabel(filter: ArrangementSourceFilter) {
+  return sourceFilters.find((item) => item.key === filter)?.label ?? "全部来源";
+}
+
 function getEditorFormFromArrangement(arrangement: ArrangementItem): EditorForm {
   return {
     title: arrangement.title,
@@ -1004,6 +1268,16 @@ function getEditorFormFromArrangement(arrangement: ArrangementItem): EditorForm 
     location: arrangement.location ?? "",
     people: arrangement.people.join("、"),
     note: arrangement.note ?? "",
+  };
+}
+
+function getEditorFormFromCandidate(candidate: ArrangementCandidate): EditorForm {
+  return {
+    title: candidate.title,
+    timePreset: "none",
+    location: "",
+    people: "",
+    note: candidate.note ?? "",
   };
 }
 

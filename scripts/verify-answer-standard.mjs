@@ -80,19 +80,31 @@ if (!scripts["verify:answer"]) {
   fail("package.json is missing scripts.verify:answer");
 }
 
-if (!scripts["verify:answer"].includes("pnpm lint")) {
+if (
+  !scripts["verify:answer"].includes("pnpm lint") &&
+  !scripts["verify:answer"].includes("pnpm.CMD lint")
+) {
   fail("scripts.verify:answer must run pnpm lint");
 }
 
-if (!scripts["verify:answer"].includes("pnpm build")) {
+if (
+  !scripts["verify:answer"].includes("pnpm build") &&
+  !scripts["verify:answer"].includes("pnpm.CMD build")
+) {
   fail("scripts.verify:answer must run pnpm build");
 }
 
-if (!scripts["verify:answer"].includes("pnpm verify:codex-log")) {
+if (
+  !scripts["verify:answer"].includes("pnpm verify:codex-log") &&
+  !scripts["verify:answer"].includes("pnpm.CMD verify:codex-log")
+) {
   fail("scripts.verify:answer must run pnpm verify:codex-log");
 }
 
-if (!scripts["verify:answer"].includes("pnpm verify:answer-standard")) {
+if (
+  !scripts["verify:answer"].includes("pnpm verify:answer-standard") &&
+  !scripts["verify:answer"].includes("pnpm.CMD verify:answer-standard")
+) {
   fail("scripts.verify:answer must run pnpm verify:answer-standard");
 }
 

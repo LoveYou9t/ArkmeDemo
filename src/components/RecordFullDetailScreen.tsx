@@ -11,6 +11,7 @@ type RecordFullDetailScreenProps = {
   onBack: () => void;
   onCreateExtension: (record: RecordItem, content: string) => void;
   onOpenSource?: (source: RecordSourceConversation) => void;
+  onCreateArrangementCandidate?: (record: RecordItem) => void;
 };
 
 export default function RecordFullDetailScreen({
@@ -19,6 +20,7 @@ export default function RecordFullDetailScreen({
   onBack,
   onCreateExtension,
   onOpenSource,
+  onCreateArrangementCandidate,
 }: RecordFullDetailScreenProps) {
   const { t } = usePreferences();
   const candidateProfile = useCandidateProfile();
@@ -28,6 +30,9 @@ export default function RecordFullDetailScreen({
   const sourceLabel =
     record.sourceConversation?.label ?? t("recordDetail.quickNoteSource");
   const canOpenSource = Boolean(record.sourceConversation && onOpenSource);
+  const canCreateArrangementCandidate =
+    Boolean(onCreateArrangementCandidate) &&
+    (record.sourceConversation?.type === "self" || record.sourceConversation?.type === "test");
   const sortedExtensionRecords = React.useMemo(
     () => [...extensionRecords].sort((a, b) => a.send_at - b.send_at),
     [extensionRecords]
@@ -66,7 +71,9 @@ export default function RecordFullDetailScreen({
           record={record}
           sourceLabel={sourceLabel}
           canOpenSource={canOpenSource}
+          canCreateArrangementCandidate={canCreateArrangementCandidate}
           onOpenSource={onOpenSource}
+          onCreateArrangementCandidate={onCreateArrangementCandidate}
           selfDisplayName={selfDisplayName}
           selfAvatarLabel={selfAvatarLabel}
         />
@@ -90,14 +97,18 @@ function MainRecordCard({
   record,
   sourceLabel,
   canOpenSource,
+  canCreateArrangementCandidate,
   onOpenSource,
+  onCreateArrangementCandidate,
   selfDisplayName,
   selfAvatarLabel,
 }: {
   record: RecordItem;
   sourceLabel: string;
   canOpenSource: boolean;
+  canCreateArrangementCandidate: boolean;
   onOpenSource?: (source: RecordSourceConversation) => void;
+  onCreateArrangementCandidate?: (record: RecordItem) => void;
   selfDisplayName: string;
   selfAvatarLabel: string;
 }) {
@@ -153,6 +164,15 @@ function MainRecordCard({
             >
               <path d="M6 4l4 4-4 4" />
             </svg>
+          </button>
+        )}
+        {canCreateArrangementCandidate && (
+          <button
+            type="button"
+            onClick={() => onCreateArrangementCandidate?.(record)}
+            className="mt-3 flex h-9 w-full items-center justify-center rounded-[11px] bg-primary-soft text-[13px] font-medium text-primary transition active:scale-[0.98]"
+          >
+            加入安排候选
           </button>
         )}
       </div>

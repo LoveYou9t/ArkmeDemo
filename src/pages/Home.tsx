@@ -5,9 +5,14 @@ import ChatInput from "@/components/ChatInput";
 import ChatList from "@/components/ChatList";
 import RecordDetailSheet from "@/components/RecordDetailSheet";
 import RecordFullDetailScreen from "@/components/RecordFullDetailScreen";
+import SearchIcon from "@/components/SearchIcon";
 import Arrangements from "@/pages/Arrangements";
 import Records from "@/pages/Records";
 import { aiConversationLogEntries } from "@/data/aiConversationLog";
+import {
+  saveArrangementCandidateFromSourceDraft,
+  type ArrangementSourceDraft,
+} from "@/data/arrangements";
 import { useCandidateProfile } from "@/data/candidateProfile";
 import {
   createTestReplyMessage,
@@ -45,6 +50,7 @@ import {
   type ThemeMode,
 } from "@/settings/preferences";
 import type { PageType } from "@/App";
+import type { ArrangementSourceRef, ArrangementSourceType } from "@/types/arrangement";
 import type { RecordItem, RecordReference, RecordSourceConversation } from "@/types/record";
 
 type HomeProps = {
@@ -1072,6 +1078,73 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
     ]
   );
 
+  const getArrangementSourceTypeFromRecord = React.useCallback(
+    (record: RecordItem): ArrangementSourceType => {
+      if (record.sourceConversation?.type === "self") return "sendToSelf";
+      if (record.sourceConversation?.type === "test") {
+        const message = testMessages.find((item) => `test-${item.id}` === record.uid);
+        return message?.conversationType === "group" ? "groupChat" : "privateChat";
+      }
+      return "manual";
+    },
+    [testMessages]
+  );
+
+  const createArrangementSourceDraftFromRecord = React.useCallback(
+    (record: RecordItem): ArrangementSourceDraft => {
+      const sourceType = getArrangementSourceTypeFromRecord(record);
+      const sourceLabel =
+        record.sourceConversation?.label ??
+        (sourceType === "manual" ? t("recordDetail.quickNoteSource") : "");
+      const excerpt = record.text_content.trim();
+      const sourceRef: ArrangementSourceRef = {
+        id: `record-source-${record.uid}`,
+        type: sourceType,
+        title: sourceLabel || t("recordDetail.quickNoteSource"),
+        excerpt,
+        createdAt: record.send_at,
+        ...(record.sourceConversation?.conversationId
+          ? { conversationId: record.sourceConversation.conversationId }
+          : {}),
+        messageId: record.uid,
+      };
+
+      return {
+        title: excerpt.slice(0, 40) || t("recordDetail.untitled"),
+        note: sourceLabel ? `来自：${sourceLabel}` : undefined,
+        sourceType,
+        sourceRef,
+      };
+    },
+    [getArrangementSourceTypeFromRecord, t]
+  );
+
+  const createArrangementCandidateFromRecord = React.useCallback(
+    (record: RecordItem) => {
+      saveArrangementCandidateFromSourceDraft(
+        createArrangementSourceDraftFromRecord(record)
+      );
+      setRecordSnapshot(null);
+    },
+    [createArrangementSourceDraftFromRecord]
+  );
+
+  const openArrangementCandidateSource = React.useCallback(
+    (sourceRef: ArrangementSourceRef) => {
+      if (sourceRef.conversationId) {
+        openTestConversation(sourceRef.conversationId, sourceRef.messageId ?? null, {
+          mode: "drawer",
+        });
+        return;
+      }
+
+      if (sourceRef.type === "sendToSelf") {
+        openSendToSelf(sourceRef.messageId ?? null, { mode: "drawer" });
+      }
+    },
+    [openSendToSelf, openTestConversation]
+  );
+
   const renderMainContent = () => {
     if (recordDetail) {
       return (
@@ -1081,6 +1154,7 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
           onBack={() => setRecordDetail(null)}
           onCreateExtension={createRecordExtension}
           onOpenSource={openSourceConversation}
+          onCreateArrangementCandidate={createArrangementCandidateFromRecord}
         />
       );
     }
@@ -1177,7 +1251,7 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
     }
 
     if (currentPage === "arrangements") {
-      return <Arrangements />;
+      return <Arrangements onOpenCandidateSource={openArrangementCandidateSource} />;
     }
 
     return (
@@ -1241,6 +1315,7 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
             record={recordSnapshot}
             onClose={() => setRecordSnapshot(null)}
             onOpenSource={openSourceConversation}
+            onCreateArrangementCandidate={createArrangementCandidateFromRecord}
           />
         </div>
       }
@@ -1717,27 +1792,7 @@ function MobileHeader({
           onClick={onSearchClick}
           aria-label={t("search.label")}
         >
-          <svg
-            width="24"
-            height="24"
-            viewBox="0 0 25 24"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-            aria-hidden="true"
-          >
-            <path
-              fillRule="evenodd"
-              clipRule="evenodd"
-              d="M11.0969 19.0453C14.9754 19.0453 18.1196 15.9012 18.1196 12.0227C18.1196 8.14416 14.9754 5 11.0969 5C7.21838 5 4.07422 8.14416 4.07422 12.0227C4.07422 15.9012 7.21838 19.0453 11.0969 19.0453ZM11.0969 21.0453C16.08 21.0453 20.1196 17.0058 20.1196 12.0227C20.1196 7.03959 16.08 3 11.0969 3C6.11381 3 2.07422 7.03959 2.07422 12.0227C2.07422 17.0058 6.11381 21.0453 11.0969 21.0453Z"
-              fill="currentColor"
-            />
-            <path
-              d="M16.8203 17.8184L19.7295 20.7282"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-            />
-          </svg>
+          <SearchIcon />
         </button>
       </div>
     </header>

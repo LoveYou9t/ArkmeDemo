@@ -7,6 +7,7 @@ type RecordDetailSheetProps = {
   record: RecordItem | null;
   onClose: () => void;
   onOpenSource?: (source: RecordSourceConversation) => void;
+  onCreateArrangementCandidate?: (record: RecordItem) => void;
 };
 
 function formatFullDateTime(timestamp: number) {
@@ -28,6 +29,7 @@ export default function RecordDetailSheet({
   record,
   onClose,
   onOpenSource,
+  onCreateArrangementCandidate,
 }: RecordDetailSheetProps) {
   const { t } = usePreferences();
 
@@ -41,11 +43,19 @@ export default function RecordDetailSheet({
   const sourceLabel =
     record.sourceConversation?.label ?? t("recordSnapshot.quickNoteSource");
   const canOpenSource = Boolean(record.sourceConversation && onOpenSource);
+  const canCreateArrangementCandidate =
+    Boolean(onCreateArrangementCandidate) &&
+    (record.sourceConversation?.type === "self" || record.sourceConversation?.type === "test");
 
   const handleOpenSource = () => {
     if (!record.sourceConversation || !onOpenSource) return;
     onOpenSource(record.sourceConversation);
     onClose();
+  };
+
+  const handleCreateArrangementCandidate = () => {
+    if (!onCreateArrangementCandidate) return;
+    onCreateArrangementCandidate(record);
   };
 
   return (
@@ -121,6 +131,15 @@ export default function RecordDetailSheet({
           </section>
 
           <div className="space-y-3 py-4">
+            {canCreateArrangementCandidate && (
+              <button
+                type="button"
+                onClick={handleCreateArrangementCandidate}
+                className="flex h-11 w-full items-center justify-center rounded-[12px] bg-primary-soft text-[14px] font-medium text-primary transition active:scale-[0.98]"
+              >
+                加入安排候选
+              </button>
+            )}
             <DetailRow
               label={t("recordDetail.sourceLocation")}
               value={
