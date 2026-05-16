@@ -8,6 +8,35 @@ This repository is a Codex-assisted coding exercise. Before analyzing or changin
 
 Treat that file as the project-local answer standard. Do not skip it, even for small changes.
 
+## Environment & Package Manager Rules
+
+- **Package Manager:** This project MUST use `pnpm` (v11.1.2+).
+- **Execution Path:** In this environment, the bare `pnpm` command might not be resolved globally. You MUST use the absolute path `C:\nvm4w\nodejs\pnpm.CMD` to execute any pnpm commands.
+  - *Example:* Instead of `pnpm install`, run `C:\nvm4w\nodejs\pnpm.CMD install`.
+  - *Example:* Instead of `pnpm test`, run `C:\nvm4w\nodejs\pnpm.CMD test`.
+
+## Build & Security Policies
+
+- **pnpm 11 Security:** This project uses pnpm 11, which restricts unauthorized build scripts.
+- The `esbuild` build script has already been allowed in `pnpm-workspace.yaml`. Do not attempt to re-configure or bypass this unless explicitly asked.
+
+## Verification Workflow
+
+Before committing or completing a task, you must ensure the following verification scripts pass using the absolute path:
+
+1. `C:\nvm4w\nodejs\pnpm.CMD verify:codex-log`
+2. `C:\nvm4w\nodejs\pnpm.CMD verify:answer`
+
+## Interface & Model Tracking Rule
+
+- **Trigger:** During any codebase exploration, architectural analysis, or technical discovery phase.
+- **Core Directive:** The moment you encounter a **high-reusability component, state-transition logic, core data model, or an API/TypeScript type critical for future AI integrations**, DO NOT hold it purely in memory. You must immediately document it explicitly in the **`docs/interface_cache.md`** file. **If this file or directory does not exist, you must create it first.**
+- **Required Details:**
+  1. **Interface/Model Name:** (e.g., `ArrangementItem` or `useLocalStorage`)
+  2. **File Location:** (Path to the source file, e.g., `src/types/arrangement.ts`)
+  3. **Core Signature:** (Use a stripped-down code block showing the essential skeleton)
+  4. **Contextual Value:** (A single sentence on why it matters, e.g., *"The sole data source for AI context-merging downstream."*)
+
 ## Local Git Hook Setup
 
 After reading this file and `docs/candidate-rules.md` for the first time in a fresh clone, run:

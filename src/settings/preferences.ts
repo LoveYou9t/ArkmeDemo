@@ -80,6 +80,7 @@ export const accentColorOptions: Array<{
 const translations: Record<string, Record<TranslationKey, string>> = {
   "zh-CN": {
     "tabs.records": "快记",
+    "tabs.arrangements": "安排",
     "tabs.insight": "洞见",
     "tabs.mine": "我的",
     "search.close": "关闭搜索",
@@ -272,6 +273,7 @@ const translations: Record<string, Record<TranslationKey, string>> = {
   },
   "zh-TW": {
     "tabs.records": "快記",
+    "tabs.arrangements": "安排",
     "tabs.insight": "洞見",
     "tabs.mine": "我的",
     "search.close": "關閉搜尋",
@@ -464,6 +466,7 @@ const translations: Record<string, Record<TranslationKey, string>> = {
   },
   "en-US": {
     "tabs.records": "Notes",
+    "tabs.arrangements": "Plans",
     "tabs.insight": "Insight",
     "tabs.mine": "Me",
     "search.close": "Close search",
@@ -656,6 +659,7 @@ const translations: Record<string, Record<TranslationKey, string>> = {
   },
   "ar-SA": {
     "tabs.records": "ملاحظات",
+    "tabs.arrangements": "خطط",
     "tabs.insight": "رؤى",
     "tabs.mine": "أنا",
     "settings.title": "الإعدادات",
