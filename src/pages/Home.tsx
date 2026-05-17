@@ -29,6 +29,7 @@ import {
   saveArrangementCandidateFromSourceDraft,
   formatArrangementCandidateNote,
   getArrangementNoteLanguageName,
+  getInitialArrangementCandidates,
   sanitizeArrangementCandidateNote,
   type ArrangementSourceDraft,
   type ArrangementTimeDraft,
@@ -103,6 +104,9 @@ const aiConversationTotalCount = aiConversationLogEntries.length;
 const maxSearchHistoryCount = 4;
 const recentArrangementScanWindowMs = 7 * 24 * 60 * 60 * 1000;
 const recentArrangementScanLimit = 20;
+const automaticArrangementRecognitionDelayMs = 1200;
+const automaticArrangementRecognitionStateStorageKey =
+  "arkme-demo.arrangementRecognitionState";
 
 type QuickSearchType = "image" | "audio" | "link" | "file" | "longArticle" | "contact";
 
@@ -145,6 +149,15 @@ type RecentArrangementScanState = {
   state: "idle" | "scanning" | "success" | "empty" | "error" | "unconfigured";
   message: string;
 };
+
+type AutomaticArrangementRecognitionState = Record<
+  string,
+  {
+    processedAt: number;
+    candidateId?: string;
+    error?: string;
+  }
+>;
 
 type LocalArrangementSemanticResult = {
   baseRecord: RecordItem;
@@ -281,6 +294,36 @@ function persistCreatedSelfRecords(records: RecordItem[]) {
     );
   } catch {
     // Storage can be unavailable in private modes; keep the in-memory record.
+  }
+}
+
+function getInitialAutomaticArrangementRecognitionState(): AutomaticArrangementRecognitionState {
+  if (typeof window === "undefined") return {};
+
+  try {
+    const parsed = JSON.parse(
+      window.localStorage.getItem(automaticArrangementRecognitionStateStorageKey) || "{}"
+    );
+    return parsed && typeof parsed === "object"
+      ? (parsed as AutomaticArrangementRecognitionState)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function persistAutomaticArrangementRecognitionState(
+  state: AutomaticArrangementRecognitionState
+) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(
+      automaticArrangementRecognitionStateStorageKey,
+      JSON.stringify(state)
+    );
+  } catch {
+    // Automatic recognition can continue in memory if localStorage is unavailable.
   }
 }
 
@@ -544,6 +587,21 @@ function mergeLocalArrangementTimeDraft(
   };
 }
 
+function getLocalArrangementEventFingerprint(
+  title: string,
+  timeDraft: ArrangementTimeDraft | undefined
+) {
+  if (!timeDraft || timeDraft.kind === "none") return undefined;
+  const normalizedTitle = title
+    .trim()
+    .replace(/\s+/g, "")
+    .replace(/[，。！？、；;,.!?\s~～]/g, "")
+    .slice(0, 24)
+    .toLocaleLowerCase();
+  if (!normalizedTitle) return undefined;
+  return `${JSON.stringify(timeDraft)}:${normalizedTitle}`;
+}
+
 function getLocalArrangementWeekday(
   text: string
 ): 0 | 1 | 2 | 3 | 4 | 5 | 6 | undefined {
@@ -663,6 +721,12 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
   );
   const initializedBrowserNotificationMessagesRef = React.useRef(false);
   const browserNotifiedMessageIdsRef = React.useRef<Set<string>>(new Set());
+  const automaticArrangementRecognitionStateRef = React.useRef<AutomaticArrangementRecognitionState>(
+    getInitialAutomaticArrangementRecognitionState()
+  );
+  const automaticArrangementRecognitionTimersRef = React.useRef<
+    Record<string, number>
+  >({});
 
   const unreadAiConversationCount = Math.max(
     0,
@@ -1439,6 +1503,10 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
           semanticResult.baseRecord.sourceConversation?.conversationId
             ? `${semanticResult.baseRecord.sourceConversation.conversationId}:${semanticResult.baseRecord.uid}`
             : semanticResult.baseRecord.uid,
+        eventFingerprint: getLocalArrangementEventFingerprint(
+          draft.title,
+          semanticResult.timeDraft
+        ),
         ...(semanticResult.timeDraft ? { timeDraft: semanticResult.timeDraft } : {}),
         note:
           formatArrangementCandidateNote(
@@ -1464,6 +1532,14 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
       setRecordSnapshot(null);
     },
     [deriveLocalArrangementCandidateDraft, mineStatisticRecords]
+  );
+
+  const getGlobalArrangementCandidates = React.useCallback(
+    () =>
+      getInitialArrangementCandidates().filter(
+        (candidate) => candidate.status === "pending" || candidate.status === "confirmed"
+      ),
+    []
   );
 
   const appendArrangementAiDiagnostic = React.useCallback(
@@ -1546,6 +1622,8 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
         const result = await recognizeArrangementCandidate(localDraft, {
           locale: resolvedLocale,
           languageName: getArrangementNoteLanguageName(resolvedLocale),
+          existingCandidates: getGlobalArrangementCandidates(),
+          globalMatching: true,
         });
         if (!result.hasArrangement) {
           appendArrangementAiDiagnostic("single", "empty", localDraft, {
@@ -1567,6 +1645,10 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
             timeDraft: result.timeDraft ?? localDraft.timeDraft,
             location: result.location,
             people: result.people,
+            eventFingerprint: result.eventFingerprint,
+            matchedCandidateId: result.matchedCandidateId,
+            globalMergeConfidence: result.globalMergeConfidence,
+            relatedMessageIds: result.relatedMessageIds,
             confidence: result.confidence,
             reason: result.reason,
           },
@@ -1611,8 +1693,118 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
       appendArrangementAiDiagnostic,
       deriveLocalArrangementCandidateDraft,
       getAiErrorDiagnostic,
+      getGlobalArrangementCandidates,
       mineStatisticRecords,
       resolvedLocale,
+    ]
+  );
+
+  const runAutomaticArrangementRecognition = React.useCallback(
+    async (record: RecordItem, contextRecords: RecordItem[]) => {
+      const localDraft = deriveLocalArrangementCandidateDraft(record, contextRecords);
+      const shouldSaveLocal =
+        Boolean(localDraft.timeDraft) ||
+        localDraft.sourceRef.id !== `record-source-${record.uid}` ||
+        !isLocalShortConfirmationText(record.text_content);
+      const markProcessed = (candidateId?: string, error?: string) => {
+        automaticArrangementRecognitionStateRef.current = {
+          ...automaticArrangementRecognitionStateRef.current,
+          [record.uid]: {
+            processedAt: Date.now(),
+            ...(candidateId ? { candidateId } : {}),
+            ...(error ? { error } : {}),
+          },
+        };
+        persistAutomaticArrangementRecognitionState(
+          automaticArrangementRecognitionStateRef.current
+        );
+      };
+
+      if (!isAiApiConfigured(aiApiSettings)) {
+        if (!shouldSaveLocal) {
+          markProcessed(undefined, "unconfigured");
+          return;
+        }
+        const savedCandidate = saveArrangementCandidateFromSourceDraft(localDraft);
+        markProcessed(savedCandidate.id, "unconfigured");
+        appendArrangementAiDiagnostic("auto", "unconfigured", localDraft, {
+          candidateId: savedCandidate.id,
+          fallbackUsed: true,
+          errorMessage: t("aiSettings.scan.unconfigured"),
+        });
+        return;
+      }
+
+      const startedAt = performance.now();
+      appendArrangementAiDiagnostic("auto", "request", localDraft);
+      try {
+        const result = await recognizeArrangementCandidate(localDraft, {
+          locale: resolvedLocale,
+          languageName: getArrangementNoteLanguageName(resolvedLocale),
+          existingCandidates: getGlobalArrangementCandidates(),
+          globalMatching: true,
+        });
+
+        if (!result.hasArrangement) {
+          markProcessed(undefined, result.reason || "empty");
+          appendArrangementAiDiagnostic("auto", "empty", localDraft, {
+            durationMs: Math.round(performance.now() - startedAt),
+            errorMessage: result.reason || "AI 娌℃湁鍙戠幇鏄庣‘瀹夋帓",
+          });
+          return;
+        }
+
+        const savedCandidate = saveArrangementCandidateFromAiDraft(
+          {
+            title: result.title,
+            note: sanitizeArrangementCandidateNote(result.note, resolvedLocale),
+            timeDraft: result.timeDraft ?? localDraft.timeDraft,
+            location: result.location,
+            people: result.people,
+            eventFingerprint: result.eventFingerprint,
+            matchedCandidateId: result.matchedCandidateId,
+            globalMergeConfidence: result.globalMergeConfidence,
+            relatedMessageIds: result.relatedMessageIds,
+            confidence: result.confidence,
+            reason: result.reason,
+          },
+          localDraft
+        );
+        markProcessed(savedCandidate.id);
+        appendArrangementAiDiagnostic("auto", "success", localDraft, {
+          durationMs: Math.round(performance.now() - startedAt),
+          resultTitle: result.title,
+          candidateId: savedCandidate.id,
+        });
+      } catch (error) {
+        const diagnostic = getAiErrorDiagnostic(error);
+        if (!shouldSaveLocal) {
+          markProcessed(undefined, diagnostic.errorMessage);
+          return;
+        }
+        const savedCandidate = saveArrangementCandidateFromSourceDraft(localDraft);
+        markProcessed(savedCandidate.id, diagnostic.errorMessage);
+        appendArrangementAiDiagnostic("auto", diagnostic.stage, localDraft, {
+          durationMs: Math.round(performance.now() - startedAt),
+          httpStatus: diagnostic.httpStatus,
+          endpoint: diagnostic.endpoint,
+          targetEndpoint: diagnostic.targetEndpoint,
+          errorName: diagnostic.errorName,
+          errorMessage: diagnostic.errorMessage,
+          responseBodySnippet: diagnostic.responseBodySnippet,
+          candidateId: savedCandidate.id,
+          fallbackUsed: true,
+        });
+      }
+    },
+    [
+      aiApiSettings,
+      appendArrangementAiDiagnostic,
+      deriveLocalArrangementCandidateDraft,
+      getAiErrorDiagnostic,
+      getGlobalArrangementCandidates,
+      resolvedLocale,
+      t,
     ]
   );
 
@@ -1668,6 +1860,8 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
           const result = await recognizeArrangementCandidate(localDraft, {
             locale: resolvedLocale,
             languageName: getArrangementNoteLanguageName(resolvedLocale),
+            existingCandidates: getGlobalArrangementCandidates(),
+            globalMatching: true,
           });
           if (!result.hasArrangement) {
             appendArrangementAiDiagnostic("quick-scan", "empty", localDraft, {
@@ -1684,6 +1878,10 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
               timeDraft: result.timeDraft ?? localDraft.timeDraft,
               location: result.location,
               people: result.people,
+              eventFingerprint: result.eventFingerprint,
+              matchedCandidateId: result.matchedCandidateId,
+              globalMergeConfidence: result.globalMergeConfidence,
+              relatedMessageIds: result.relatedMessageIds,
               confidence: result.confidence,
               reason: result.reason,
             },
@@ -1743,9 +1941,48 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
     appendArrangementAiDiagnostic,
     deriveLocalArrangementCandidateDraft,
     getAiErrorDiagnostic,
+    getGlobalArrangementCandidates,
     resolvedLocale,
     selfRecords,
     t,
+    testConversationRecords,
+  ]);
+
+  React.useEffect(() => {
+    const recordsByConversation = [...selfRecords, ...testConversationRecords].reduce<
+      Record<string, RecordItem[]>
+    >((groups, record) => {
+      const key =
+        record.sourceConversation?.conversationId ??
+        record.sourceConversation?.recordUid ??
+        record.uid;
+      groups[key] = [...(groups[key] ?? []), record];
+      return groups;
+    }, {});
+
+    Object.entries(recordsByConversation).forEach(([groupKey, records]) => {
+      const latestRecord = records
+        .filter((record) => !automaticArrangementRecognitionStateRef.current[record.uid])
+        .sort((a, b) => b.send_at - a.send_at)[0];
+      if (!latestRecord) return;
+
+      const existingTimer = automaticArrangementRecognitionTimersRef.current[groupKey];
+      if (existingTimer) window.clearTimeout(existingTimer);
+      automaticArrangementRecognitionTimersRef.current[groupKey] = window.setTimeout(() => {
+        runAutomaticArrangementRecognition(latestRecord, records);
+        delete automaticArrangementRecognitionTimersRef.current[groupKey];
+      }, automaticArrangementRecognitionDelayMs);
+    });
+
+    return () => {
+      Object.values(automaticArrangementRecognitionTimersRef.current).forEach((timer) =>
+        window.clearTimeout(timer)
+      );
+      automaticArrangementRecognitionTimersRef.current = {};
+    };
+  }, [
+    runAutomaticArrangementRecognition,
+    selfRecords,
     testConversationRecords,
   ]);
   const openAiApiSettings = React.useCallback(() => {

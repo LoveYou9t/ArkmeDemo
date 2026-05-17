@@ -889,7 +889,12 @@ type ArrangementSourceRef = {
 
 type ArrangementCandidate = {
   sourceRef: ArrangementSourceRef;
+  sourceRefs?: ArrangementSourceRef[];
   semanticKey?: string;
+  eventFingerprint?: string;
+  matchedCandidateId?: string;
+  linkedCandidateIds?: string[];
+  globalMergeConfidence?: number;
 };
 
 type ArrangementItem = {

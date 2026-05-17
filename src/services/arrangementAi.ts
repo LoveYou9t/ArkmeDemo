@@ -4,6 +4,7 @@ import {
   type AiApiSettings,
 } from "@/data/aiApiSettings";
 import type {
+  ArrangementCandidate,
   ArrangementSourceDraft,
   ArrangementTimeDraft,
   ArrangementTimePart,
@@ -16,6 +17,10 @@ export type AiArrangementRecognitionResult = {
   location?: string;
   people?: string[];
   note?: string;
+  eventFingerprint?: string;
+  matchedCandidateId?: string;
+  globalMergeConfidence?: number;
+  relatedMessageIds?: string[];
   confidence?: number;
   reason?: string;
 };
@@ -78,6 +83,11 @@ function normalizePeople(value: unknown) {
     .map((item) => normalizeText(item, 24))
     .filter(Boolean)
     .slice(0, 6);
+}
+
+function normalizeStringArray(value: unknown, maxLength: number, limit: number) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => normalizeText(item, maxLength)).filter(Boolean).slice(0, limit);
 }
 
 function normalizeTimePart(value: unknown): ArrangementTimePart | undefined {
@@ -161,6 +171,14 @@ function normalizeResult(value: unknown): AiArrangementRecognitionResult {
     location: normalizeText(result.location, 40),
     people: normalizePeople(result.people),
     note: normalizeText(result.note, 240),
+    eventFingerprint: normalizeText(result.eventFingerprint, 120),
+    matchedCandidateId: normalizeText(result.matchedCandidateId, 120),
+    globalMergeConfidence:
+      typeof result.globalMergeConfidence === "number" &&
+      Number.isFinite(result.globalMergeConfidence)
+        ? Math.min(1, Math.max(0, result.globalMergeConfidence))
+        : undefined,
+    relatedMessageIds: normalizeStringArray(result.relatedMessageIds, 80, 12),
     confidence:
       typeof result.confidence === "number" && Number.isFinite(result.confidence)
         ? Math.min(1, Math.max(0, result.confidence))
@@ -212,9 +230,34 @@ function getSourceContext(sourceDraft: ArrangementSourceDraft) {
     .join("\n");
 }
 
+function getCandidateContext(candidates: ArrangementCandidate[]) {
+  return candidates
+    .filter((candidate) => candidate.status === "pending" || candidate.status === "confirmed")
+    .slice(0, 12)
+    .map((candidate) => ({
+      id: candidate.id,
+      title: candidate.title,
+      timeDraft: candidate.timeDraft,
+      location: candidate.location,
+      people: candidate.people,
+      note: candidate.note,
+      eventFingerprint: candidate.eventFingerprint,
+      semanticKey: candidate.semanticKey,
+      sourceTitles: (candidate.sourceRefs ?? [candidate.sourceRef])
+        .map((sourceRef) => sourceRef.title)
+        .filter(Boolean)
+        .slice(0, 4),
+    }));
+}
+
 export async function recognizeArrangementCandidate(
   sourceDraft: ArrangementSourceDraft,
-  options: { locale?: string; languageName?: string } = {}
+  options: {
+    locale?: string;
+    languageName?: string;
+    existingCandidates?: ArrangementCandidate[];
+    globalMatching?: boolean;
+  } = {}
 ): Promise<AiArrangementRecognitionResult> {
   const settings = getAiApiSettings();
   const endpoint = arrangementRecognitionProxyEndpoint;
@@ -242,6 +285,8 @@ export async function recognizeArrangementCandidate(
         model: settings.model.trim(),
         locale: options.locale,
         languageName: options.languageName,
+        existingCandidates: getCandidateContext(options.existingCandidates ?? []),
+        globalMatching: options.globalMatching ?? true,
       }),
     });
   } catch (error) {

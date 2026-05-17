@@ -16,7 +16,7 @@ export type AiRecognitionDiagnosticStage =
   | "unconfigured"
   | "fallback";
 
-export type AiRecognitionDiagnosticAction = "single" | "quick-scan";
+export type AiRecognitionDiagnosticAction = "single" | "quick-scan" | "auto";
 
 export type AiRecognitionDiagnosticEntry = {
   id: string;
@@ -71,7 +71,7 @@ function isAiRecognitionDiagnosticEntry(
   return (
     typeof entry.id === "string" &&
     typeof entry.timestamp === "number" &&
-    (entry.action === "single" || entry.action === "quick-scan") &&
+    (entry.action === "single" || entry.action === "quick-scan" || entry.action === "auto") &&
     typeof entry.stage === "string"
   );
 }

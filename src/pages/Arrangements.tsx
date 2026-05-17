@@ -449,6 +449,22 @@ function ArrangementCandidateSection({
                 {candidate.createdBy === "ai" && (
                   <MetaPill label={t("arrangements.candidate.aiSuggestion")} tone="primary" />
                 )}
+                {candidate.sourceRefs && candidate.sourceRefs.length > 1 && (
+                  <MetaPill label={t("arrangements.candidate.globalLinked")} tone="primary" />
+                )}
+                {candidate.sourceRefs && candidate.sourceRefs.length > 1 && (
+                  <MetaPill
+                    label={t("arrangements.candidate.sourceCount", {
+                      count: candidate.sourceRefs.length,
+                    })}
+                  />
+                )}
+                {!candidate.sourceRefs?.length &&
+                  typeof candidate.globalMergeConfidence === "number" &&
+                  candidate.globalMergeConfidence > 0 &&
+                  candidate.globalMergeConfidence < 0.82 && (
+                    <MetaPill label={t("arrangements.candidate.possibleLink")} />
+                  )}
                 <MetaPill label={t(getSourceTypeLabelKey(candidate.sourceType))} />
               </div>
             </div>
@@ -479,6 +495,21 @@ function ArrangementCandidateSection({
             <p className="mt-2 line-clamp-2 text-[13px] leading-5 text-text-muted">
               {t("arrangements.candidate.source", { excerpt: candidate.sourceRef.excerpt })}
             </p>
+            {candidate.sourceRefs && candidate.sourceRefs.length > 1 && (
+              <div className="mt-2 space-y-1">
+                {candidate.sourceRefs.slice(0, 3).map((sourceRef) => (
+                  <button
+                    key={`${sourceRef.type}-${sourceRef.id}`}
+                    type="button"
+                    onClick={() => onOpenSource?.(sourceRef)}
+                    className="block w-full truncate text-left text-[11px] leading-4 text-text-tertiary hover:text-primary disabled:hover:text-text-tertiary"
+                    disabled={!onOpenSource}
+                  >
+                    {sourceRef.title} · {sourceRef.excerpt}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="mt-3 grid grid-cols-3 gap-2">
               <button
                 type="button"
@@ -1018,9 +1049,14 @@ function ArrangementDetailSheet({
                   className="rounded-[10px] border border-border-light bg-surface px-3 py-2"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <p className="min-w-0 flex-1 truncate text-[12px] font-medium leading-5 text-text-muted">
-                      {sourceRef.title}
-                    </p>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[12px] font-medium leading-5 text-text-muted">
+                        {sourceRef.title}
+                      </p>
+                      <p className="truncate text-[11px] leading-4 text-text-tertiary">
+                        {formatSourceContextTime(sourceRef.createdAt, resolvedLocale, t)}
+                      </p>
+                    </div>
                     <MetaPill label={t(getSourceTypeLabelKey(sourceRef.type))} />
                   </div>
                   <p className="mt-0.5 text-[13px] leading-5 text-text">
@@ -1647,6 +1683,54 @@ function formatArrangementTime(
   }
 
   return t("arrangements.time.noTime");
+}
+
+function formatSourceContextTime(
+  timestamp: number,
+  locale: string,
+  t: (key: string, values?: Record<string, string | number>) => string
+) {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const time = `${padNumber(date.getHours())}:${padNumber(date.getMinutes())}`;
+
+  if (isToday(timestamp, now.getTime())) return `${t("time.today")} ${time}`;
+  if (isYesterday(timestamp, now.getTime())) return `${t("time.yesterday")} ${time}`;
+  if (isDayBeforeYesterday(timestamp, now.getTime())) {
+    return `${t("time.dayBeforeYesterday")} ${time}`;
+  }
+
+  return `${formatSourceContextDate(date, now, locale)} ${time}`;
+}
+
+function isYesterday(timestamp: number, now = Date.now()) {
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const target = new Date(timestamp);
+  return (
+    target.getFullYear() === yesterday.getFullYear() &&
+    target.getMonth() === yesterday.getMonth() &&
+    target.getDate() === yesterday.getDate()
+  );
+}
+
+function isDayBeforeYesterday(timestamp: number, now = Date.now()) {
+  const dayBeforeYesterday = new Date(now);
+  dayBeforeYesterday.setDate(dayBeforeYesterday.getDate() - 2);
+  const target = new Date(timestamp);
+  return (
+    target.getFullYear() === dayBeforeYesterday.getFullYear() &&
+    target.getMonth() === dayBeforeYesterday.getMonth() &&
+    target.getDate() === dayBeforeYesterday.getDate()
+  );
+}
+
+function formatSourceContextDate(date: Date, now: Date, locale: string) {
+  return new Intl.DateTimeFormat(locale, {
+    ...(date.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }),
+    month: "numeric",
+    day: "numeric",
+  }).format(date);
 }
 
 function isLegacyNoTimeLabel(label: string) {

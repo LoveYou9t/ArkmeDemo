@@ -14,6 +14,8 @@ type ArrangementRecognitionRequest = {
     };
   };
   sourceContext?: unknown;
+  existingCandidates?: unknown;
+  globalMatching?: unknown;
   baseUrl?: unknown;
   apiKey?: unknown;
   model?: unknown;
@@ -43,6 +45,10 @@ const arrangementRecognitionSchema = {
     "note",
     "confidence",
     "reason",
+    "eventFingerprint",
+    "matchedCandidateId",
+    "globalMergeConfidence",
+    "relatedMessageIds",
   ],
   properties: {
     hasArrangement: { type: "boolean" },
@@ -65,6 +71,10 @@ const arrangementRecognitionSchema = {
     note: { type: "string" },
     confidence: { type: "number", minimum: 0, maximum: 1 },
     reason: { type: "string" },
+    eventFingerprint: { type: "string" },
+    matchedCandidateId: { type: "string" },
+    globalMergeConfidence: { type: "number", minimum: 0, maximum: 1 },
+    relatedMessageIds: { type: "array", items: { type: "string" } },
   },
 };
 
@@ -148,6 +158,52 @@ function getSourceDraft(requestBody: ArrangementRecognitionRequest) {
   };
 }
 
+function getExistingCandidatesContext(value: unknown) {
+  if (!Array.isArray(value)) return "";
+
+  const candidates = value
+    .slice(0, 12)
+    .map((candidate) => {
+      if (!candidate || typeof candidate !== "object") return null;
+      const item = candidate as Record<string, unknown>;
+      const id = normalizeText(item.id);
+      const title = normalizeText(item.title);
+      if (!id || !title) return null;
+
+      return {
+        id,
+        title,
+        timeDraft: item.timeDraft ?? null,
+        location: normalizeText(item.location),
+        people: Array.isArray(item.people) ? item.people.map(normalizeText).filter(Boolean) : [],
+        note: normalizeText(item.note),
+        eventFingerprint: normalizeText(item.eventFingerprint),
+        semanticKey: normalizeText(item.semanticKey),
+        sourceTitles: Array.isArray(item.sourceTitles)
+          ? item.sourceTitles.map(normalizeText).filter(Boolean)
+          : [],
+      };
+    })
+    .filter(Boolean);
+
+  return candidates.length > 0 ? JSON.stringify(candidates) : "";
+}
+
+function getSystemPrompt(languageName: string) {
+  return [
+    "You are an arrangement-recognition and autofill assistant for a mobile demo.",
+    "Decide whether the message/context contains a concrete arrangement. Extract what the user needs to do, when, where, and with whom.",
+    "The title must be an actionable arrangement summary, not just a short confirmation reply.",
+    "location and people must only use information present in the provided text/context. Do not invent missing people, places, or times.",
+    `note must be exactly one natural sentence in ${languageName}. It must cover when, who asked the user to do what, and what the user replied if a reply exists.`,
+    "Do not put source labels, reasons, confidence, internal field names, context labels, bullet lists, or words like Source, Confirmation reply, sourceRef, draft, or context in note.",
+    "For global matching, compare with existing candidates. If this is the same arrangement across chats, set matchedCandidateId to that candidate id and set globalMergeConfidence from 0 to 1.",
+    "Only match across chats when confidence is high and the time/place/people/action describe the same event. Similar but different events must not match.",
+    "Return eventFingerprint as a short stable key from date/time/place/people/action when enough information exists, otherwise return an empty string.",
+    "Return timeDraft as the fixed object shape. Use kind none and empty fields when time is missing; use weekday -1 when no weekday applies.",
+  ].join("\n");
+}
+
 export async function arrangementRecognitionProxy(
   request: IncomingMessage,
   response: ServerResponse
@@ -169,6 +225,10 @@ export async function arrangementRecognitionProxy(
       normalizeText(requestBody.model) || normalizeText(process.env.OPENAI_MODEL) || "gpt-4.1-mini";
     const languageName = getLanguageName(requestBody.languageName, requestBody.locale);
     const targetEndpoint = getResponsesEndpoint(baseUrl);
+    const existingCandidatesContext = getExistingCandidatesContext(
+      requestBody.existingCandidates
+    );
+    const globalMatching = requestBody.globalMatching !== false;
 
     if (!apiKey) {
       sendJson(response, 500, {
@@ -190,26 +250,25 @@ export async function arrangementRecognitionProxy(
         input: [
           {
             role: "system",
-            content:
-              `你是即我 Demo 的安排自动填充助手。请根据同一会话上下文判断是否有明确安排，并提取谁、什么时间、在哪里、做什么和备注。title 要总结成可执行安排，不要只复述短确认回复。timeDraft 必须返回固定对象；kind 可为 none、relativeDay、weekday、date；无值字段用空字符串，weekday 无值用 -1。part 使用 morning/afternoon/evening 或空字符串；clock 使用 HH:mm 或空字符串。location 和 people 只能从原文或上下文中提取，缺失时返回空字符串或空数组。note 必须使用 ${languageName}，且只能是一句话，结构必须覆盖“什么时候、谁要用户做什么、用户回复了什么”。不要在 note 中写来源、理由、可信度、内部字段、上下文标签或多条清单，也不要输出 Source、Confirmation reply、sourceRef、draft、context 等内部术语。不要替用户创建正式安排，不要编造文本中没有的人名、地点或时间。`,
+            content: getSystemPrompt(languageName),
           },
           {
             role: "user",
             content: [
-              typeof requestBody.sourceContext === "string"
-                ? requestBody.sourceContext
+              typeof requestBody.sourceContext === "string" ? requestBody.sourceContext : "",
+              `sourceType: ${sourceDraft.sourceType}`,
+              `sourceTitle: ${sourceDraft.sourceRefTitle}`,
+              sourceDraft.conversationId ? `conversationId: ${sourceDraft.conversationId}` : "",
+              sourceDraft.messageId ? `messageId: ${sourceDraft.messageId}` : "",
+              `originalMessage: ${sourceDraft.excerpt}`,
+              `localCandidateTitle: ${sourceDraft.title}`,
+              sourceDraft.timeDraft ? `localTimeDraft: ${JSON.stringify(sourceDraft.timeDraft)}` : "",
+              sourceDraft.note ? `localContextNote: ${sourceDraft.note}` : "",
+              existingCandidatesContext
+                ? `existingGlobalCandidates: ${existingCandidatesContext}`
                 : "",
-              `来源类型：${sourceDraft.sourceType}`,
-              `来源标题：${sourceDraft.sourceRefTitle}`,
-              sourceDraft.conversationId ? `会话 ID：${sourceDraft.conversationId}` : "",
-              sourceDraft.messageId ? `消息 ID：${sourceDraft.messageId}` : "",
-              `原始消息：${sourceDraft.excerpt}`,
-              `本地候选标题：${sourceDraft.title}`,
-              sourceDraft.timeDraft
-                ? `本地时间草稿：${JSON.stringify(sourceDraft.timeDraft)}`
-                : "",
-              sourceDraft.note ? `上下文备注：${sourceDraft.note}` : "",
-              `请输出候选安排。优先填充 title、timeDraft、location、people、note。note 使用 ${languageName}，只写一句自然语言摘要：什么时候，谁要用户做什么，用户回复什么。若上下文不足以判断为安排，返回 hasArrangement=false。`,
+              `globalMatchingEnabled: ${globalMatching ? "true" : "false"}`,
+              "Return the JSON schema fields only.",
             ]
               .filter(Boolean)
               .join("\n"),

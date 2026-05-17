@@ -53,8 +53,13 @@ export type ArrangementCandidate = {
   location?: string;
   people?: string[];
   semanticKey?: string;
+  eventFingerprint?: string;
+  matchedCandidateId?: string;
+  linkedCandidateIds?: string[];
+  globalMergeConfidence?: number;
   sourceType: ArrangementSourceType;
   sourceRef: ArrangementSourceRef;
+  sourceRefs?: ArrangementSourceRef[];
   status: ArrangementCandidateStatus;
   confidence?: number;
   reason?: string;
@@ -68,8 +73,10 @@ export type ArrangementSourceDraft = {
   note?: string;
   timeDraft?: ArrangementTimeDraft;
   semanticKey?: string;
+  eventFingerprint?: string;
   sourceType: ArrangementSourceType;
   sourceRef: ArrangementSourceRef;
+  sourceRefs?: ArrangementSourceRef[];
 };
 
 export type AiArrangementCandidateDraft = {
@@ -78,6 +85,10 @@ export type AiArrangementCandidateDraft = {
   timeDraft?: ArrangementTimeDraft;
   location?: string;
   people?: string[];
+  eventFingerprint?: string;
+  matchedCandidateId?: string;
+  globalMergeConfidence?: number;
+  relatedMessageIds?: string[];
   confidence?: number;
   reason?: string;
 };
@@ -126,6 +137,12 @@ function normalizeTimestamp(value: unknown, fallback: number) {
 function normalizeStringArray(value: unknown) {
   if (!Array.isArray(value)) return [];
   return value.map(normalizeText).filter(Boolean);
+}
+
+function normalizeNumberRatio(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(1, Math.max(0, value))
+    : undefined;
 }
 
 export function getArrangementNoteLocale(locale: string): ArrangementNoteLocale {
@@ -433,6 +450,15 @@ function normalizeSourceRef(value: unknown, index: number): ArrangementSourceRef
   };
 }
 
+function normalizeSourceRefs(value: unknown, fallback: ArrangementSourceRef) {
+  const sourceRefs = Array.isArray(value)
+    ? value
+        .map(normalizeSourceRef)
+        .filter((sourceRef): sourceRef is ArrangementSourceRef => Boolean(sourceRef))
+    : [];
+  return mergeSourceRefs([fallback], sourceRefs);
+}
+
 export function normalizeArrangementCandidate(
   value: unknown,
   index: number
@@ -451,6 +477,7 @@ export function normalizeArrangementCandidate(
     ? candidate.status
     : "pending";
   const createdBy = candidate.createdBy === "ai" ? "ai" : "validation";
+  const sourceRefs = normalizeSourceRefs(candidate.sourceRefs, sourceRef);
 
   return {
     id: normalizeText(candidate.id) || `candidate-${index}`,
@@ -468,11 +495,24 @@ export function normalizeArrangementCandidate(
     ...(normalizeText(candidate.semanticKey)
       ? { semanticKey: normalizeText(candidate.semanticKey) }
       : {}),
+    ...(normalizeText(candidate.eventFingerprint)
+      ? { eventFingerprint: normalizeText(candidate.eventFingerprint) }
+      : {}),
+    ...(normalizeText(candidate.matchedCandidateId)
+      ? { matchedCandidateId: normalizeText(candidate.matchedCandidateId) }
+      : {}),
+    ...(normalizeStringArray(candidate.linkedCandidateIds).length > 0
+      ? { linkedCandidateIds: normalizeStringArray(candidate.linkedCandidateIds) }
+      : {}),
+    ...(normalizeNumberRatio(candidate.globalMergeConfidence) !== undefined
+      ? { globalMergeConfidence: normalizeNumberRatio(candidate.globalMergeConfidence) }
+      : {}),
     sourceType,
     sourceRef,
+    sourceRefs,
     status,
-    ...(typeof candidate.confidence === "number" && Number.isFinite(candidate.confidence)
-      ? { confidence: Math.min(1, Math.max(0, candidate.confidence)) }
+    ...(normalizeNumberRatio(candidate.confidence) !== undefined
+      ? { confidence: normalizeNumberRatio(candidate.confidence) }
       : {}),
     ...(normalizeText(candidate.reason) ? { reason: normalizeText(candidate.reason) } : {}),
     createdBy,
@@ -590,6 +630,26 @@ function getSourceRefKey(sourceRef: ArrangementSourceRef) {
   return sourceRef.messageId || sourceRef.id;
 }
 
+function mergeSourceRefs(
+  ...sourceRefGroups: Array<Array<ArrangementSourceRef | undefined> | undefined>
+) {
+  const sourceRefs = sourceRefGroups
+    .flatMap((group) => group ?? [])
+    .filter((sourceRef): sourceRef is ArrangementSourceRef => Boolean(sourceRef));
+  const sourceRefMap = new Map<string, ArrangementSourceRef>();
+  sourceRefs.forEach((sourceRef) => {
+    const key = `${sourceRef.type}:${getSourceRefKey(sourceRef)}`;
+    if (!sourceRefMap.has(key)) {
+      sourceRefMap.set(key, sourceRef);
+    }
+  });
+  return Array.from(sourceRefMap.values());
+}
+
+function getCandidateSourceRefs(candidate: ArrangementCandidate) {
+  return mergeSourceRefs([candidate.sourceRef], candidate.sourceRefs);
+}
+
 function getNormalizedCandidateTitle(title: string) {
   return title.trim().replace(/\s+/g, "").toLocaleLowerCase();
 }
@@ -633,6 +693,24 @@ function shouldMergeArrangementCandidates(
     return true;
   }
 
+  if (existingCandidate.id === nextCandidate.matchedCandidateId) {
+    return (nextCandidate.globalMergeConfidence ?? 0) >= 0.82;
+  }
+
+  if (nextCandidate.id === existingCandidate.matchedCandidateId) {
+    return (existingCandidate.globalMergeConfidence ?? 0) >= 0.82;
+  }
+
+  if (
+    existingCandidate.eventFingerprint &&
+    nextCandidate.eventFingerprint &&
+    existingCandidate.eventFingerprint === nextCandidate.eventFingerprint &&
+    ((existingCandidate.globalMergeConfidence ?? 0) >= 0.82 ||
+      (nextCandidate.globalMergeConfidence ?? 0) >= 0.82)
+  ) {
+    return true;
+  }
+
   const existingConversationId = getCandidateConversationId(existingCandidate);
   const nextConversationId = getCandidateConversationId(nextCandidate);
   if (!existingConversationId || existingConversationId !== nextConversationId) {
@@ -662,6 +740,24 @@ function mergeCandidateNotes(previousNote?: string, nextNote?: string) {
   return Array.from(new Set(notes)).join("\n");
 }
 
+function mergeLinkedCandidateIds(
+  existingCandidate: ArrangementCandidate,
+  nextCandidate: ArrangementCandidate
+) {
+  return Array.from(
+    new Set(
+      [
+        existingCandidate.id,
+        nextCandidate.id,
+        ...(existingCandidate.linkedCandidateIds ?? []),
+        ...(nextCandidate.linkedCandidateIds ?? []),
+        nextCandidate.matchedCandidateId,
+        existingCandidate.matchedCandidateId,
+      ].filter((id): id is string => Boolean(id))
+    )
+  );
+}
+
 function mergeArrangementCandidate(
   existingCandidate: ArrangementCandidate,
   nextCandidate: ArrangementCandidate
@@ -669,6 +765,11 @@ function mergeArrangementCandidate(
   const baseCandidate = getArrangementCandidateMergeBase(existingCandidate, nextCandidate);
   const dataCandidate = baseCandidate === nextCandidate ? nextCandidate : existingCandidate;
   const otherCandidate = dataCandidate === nextCandidate ? existingCandidate : nextCandidate;
+  const sourceRefs = mergeSourceRefs(
+    getCandidateSourceRefs(existingCandidate),
+    getCandidateSourceRefs(nextCandidate)
+  );
+  const linkedCandidateIds = mergeLinkedCandidateIds(existingCandidate, nextCandidate);
 
   return {
     ...baseCandidate,
@@ -683,8 +784,18 @@ function mergeArrangementCandidate(
         ? dataCandidate.people
         : otherCandidate.people,
     semanticKey: baseCandidate.semanticKey ?? dataCandidate.semanticKey ?? otherCandidate.semanticKey,
+    eventFingerprint:
+      dataCandidate.eventFingerprint ?? otherCandidate.eventFingerprint ?? baseCandidate.eventFingerprint,
+    matchedCandidateId:
+      dataCandidate.matchedCandidateId ?? otherCandidate.matchedCandidateId,
+    ...(linkedCandidateIds.length > 0 ? { linkedCandidateIds } : {}),
+    globalMergeConfidence:
+      dataCandidate.globalMergeConfidence ??
+      otherCandidate.globalMergeConfidence ??
+      baseCandidate.globalMergeConfidence,
     sourceType: baseCandidate.sourceType,
     sourceRef: baseCandidate.sourceRef,
+    sourceRefs,
     confidence: dataCandidate.confidence ?? otherCandidate.confidence,
     reason: dataCandidate.reason ?? otherCandidate.reason,
     createdBy:
@@ -726,8 +837,10 @@ export function createArrangementCandidateFromSourceDraft(
       : {}),
     ...(draft.timeDraft ? { timeDraft: draft.timeDraft } : {}),
     ...(draft.semanticKey ? { semanticKey: draft.semanticKey } : {}),
+    ...(draft.eventFingerprint ? { eventFingerprint: draft.eventFingerprint } : {}),
     sourceType: draft.sourceType,
     sourceRef: draft.sourceRef,
+    sourceRefs: mergeSourceRefs([draft.sourceRef], draft.sourceRefs),
     status: "pending",
     createdBy: "validation",
     createdAt: timestamp,
@@ -781,11 +894,22 @@ export function createArrangementCandidateFromAiDraft(
     ...(draft.location?.trim() ? { location: draft.location.trim() } : {}),
     people: normalizeStringArray(draft.people),
     ...(sourceDraft.semanticKey ? { semanticKey: sourceDraft.semanticKey } : {}),
+    ...(draft.eventFingerprint ?? sourceDraft.eventFingerprint
+      ? { eventFingerprint: draft.eventFingerprint ?? sourceDraft.eventFingerprint }
+      : {}),
+    ...(draft.matchedCandidateId ? { matchedCandidateId: draft.matchedCandidateId } : {}),
+    ...(normalizeStringArray(draft.relatedMessageIds).length > 0
+      ? { linkedCandidateIds: normalizeStringArray(draft.relatedMessageIds) }
+      : {}),
+    ...(normalizeNumberRatio(draft.globalMergeConfidence) !== undefined
+      ? { globalMergeConfidence: normalizeNumberRatio(draft.globalMergeConfidence) }
+      : {}),
     sourceType: sourceDraft.sourceType,
     sourceRef: sourceDraft.sourceRef,
+    sourceRefs: mergeSourceRefs([sourceDraft.sourceRef], sourceDraft.sourceRefs),
     status: "pending",
-    ...(typeof draft.confidence === "number" && Number.isFinite(draft.confidence)
-      ? { confidence: Math.min(1, Math.max(0, draft.confidence)) }
+    ...(normalizeNumberRatio(draft.confidence) !== undefined
+      ? { confidence: normalizeNumberRatio(draft.confidence) }
       : {}),
     ...(draft.reason?.trim() ? { reason: draft.reason.trim() } : {}),
     createdBy: "ai",
@@ -880,7 +1004,7 @@ export function createArrangementFromCandidate(
     ...(input.location?.trim() ? { location: input.location.trim() } : {}),
     people: splitPeople(input.people),
     sourceType: candidate.sourceType,
-    sourceRefs: [candidate.sourceRef],
+    sourceRefs: getCandidateSourceRefs(candidate),
     aiCapability: candidate.createdBy === "ai" ? "aiAssist" : "userOnly",
     attentionScore: input.timeDraft.kind === "none" ? 30 : 60,
     createdAt: timestamp,

@@ -5241,7 +5241,7 @@ export const aiConversationLogEntries: AiConversationLogEntry[] = [
     verification: [
       "已阅读 docs/candidate-rules.md、src/settings/preferences.ts、src/pages/Arrangements.tsx、src/pages/Home.tsx、src/components/RecordDetailSheet.tsx、src/data/arrangements.ts、src/services/arrangementAi.ts",
       "待执行 C:\\nvm4w\\nodejs\\pnpm.CMD verify:codex-log",
-      "待执行 C:\\nvm4w\\nodejs\\pnpm.CMD verify:answer",
+      "C:\\nvm4w\\nodejs\\pnpm.CMD verify:answer 通过，Vite 仅提示 chunk size warning",
     ],
   },
   {
@@ -5335,6 +5335,100 @@ export const aiConversationLogEntries: AiConversationLogEntry[] = [
       "已将上一轮最新日志中的待执行验证结果修正为通过",
       "git commit -m \"Add AI recognition planning and settings\" 成功，提交 1954d39",
       "git push loveyou9t main 成功，pre-push 自动 verify:answer 通过",
+    ],
+  },
+  {
+    timestamp: "2026-05-17 23:38:29 CST (+0800)",
+    userInput:
+      "PLEASE IMPLEMENT THIS PLAN: 跨聊天全局同一安排关联与自动识别最终实施计划。要求同一安排跨私聊、群聊、快记全局关联；新消息自动识别；AI 高置信自动合并，低置信弱提示；新增标签复用 MetaPill 风格。",
+    aiFinalOutput:
+      "已实现跨聊天全局同一安排关联与自动识别：候选模型新增 sourceRefs、eventFingerprint、matchedCandidateId、linkedCandidateIds 和 globalMergeConfidence，旧候选读取时自动补齐来源集合；候选保存层支持 AI 高置信 matchedCandidateId 或 eventFingerprint 跨聊天合并，确认正式安排时写入全部来源。AI 代理 schema 和 prompt 已扩展为返回全局匹配字段，前端识别请求会携带当前 pending/confirmed 候选摘要。Home 新增 1200ms debounce 自动识别队列，覆盖快记和测试聊天最近未处理消息，AI 未配置或失败时保守回退同聊天本地规则。候选卡继续复用 MetaPill，新增跨聊天关联、疑似关联和来源数量标签，并展示多条来源入口。",
+    changedFiles: [
+      "src/data/arrangements.ts",
+      "src/services/arrangementAi.ts",
+      "server/arrangementRecognitionProxy.ts",
+      "src/data/aiRecognitionDiagnostics.ts",
+      "src/pages/Home.tsx",
+      "src/pages/Arrangements.tsx",
+      "src/settings/preferences.ts",
+      "docs/interface_cache.md",
+      "docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md",
+      "src/data/aiConversationLog.ts",
+    ],
+    verification: [
+      "C:\\nvm4w\\nodejs\\pnpm.CMD lint 通过",
+      "C:\\nvm4w\\nodejs\\pnpm.CMD build 通过，Vite 仅提示 chunk size warning",
+      "待执行 C:\\nvm4w\\nodejs\\pnpm.CMD verify:codex-log",
+      "待执行 C:\\nvm4w\\nodejs\\pnpm.CMD verify:answer",
+    ],
+  },
+  {
+    timestamp: "2026-05-18 00:24:38 CST (+0800)",
+    userInput:
+      "最后全量扫描代码，查看是否有BUG，生成一个安排模块的收尾md",
+    aiFinalOutput:
+      "已完成安排模块收尾级全量扫描，并新增 `docs/arrangements-final-scan-closeout.md`。扫描覆盖安排页、安排数据层、AI 识别服务、同源代理、诊断日志、多语言配置、记录详情入口和首页自动识别入口；`lint`、`build`、`verify:codex-log`、`verify:answer` 均通过，Vite 仅提示 chunk size warning。扫描未发现阻塞运行的编译级 BUG；已修复 `.codex/candidate-session.json` 非法 JSON 问题。收尾报告中记录了核心流程已闭环，以及历史乱码展示文案、localStorage Demo 边界、前端 debounce 自动识别、代理凭据策略等非阻塞风险。",
+    changedFiles: [
+      ".codex/candidate-session.json",
+      "docs/arrangements-final-scan-closeout.md",
+      "docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md",
+      "src/data/aiConversationLog.ts",
+    ],
+    verification: [
+      "C:\\nvm4w\\nodejs\\pnpm.CMD lint 通过",
+      "C:\\nvm4w\\nodejs\\pnpm.CMD build 通过，Vite 仅提示 chunk size warning",
+      "C:\\nvm4w\\nodejs\\pnpm.CMD verify:codex-log 通过",
+      "C:\\nvm4w\\nodejs\\pnpm.CMD verify:answer 通过，Vite 仅提示 chunk size warning",
+    ],
+  },
+  {
+    timestamp: "2026-05-18 00:39:07 CST (+0800)",
+    userInput:
+      "`src/data/aiConversationLog.ts` 与当前个人 Markdown 日志中存在大量历史乱码记录，要彻底恢复，单独做一轮日志内容迁移。",
+    aiFinalOutput:
+      "已完成当前候选人日志乱码迁移：对 `docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md` 和 `src/data/aiConversationLog.ts` 执行 GBK/UTF-8 误解码的可逆恢复，并修复 `.codex/candidate-session.json` 为合法 JSON。迁移后个人 Markdown 日志仍保持 83 条历史记录；抽样统计显示个人 Markdown 日志目标乱码计数为 0，`aiConversationLog.ts` 剩余命中为少量正常中文误报。`verify:answer` 已通过，Vite 仅提示 chunk size warning。",
+    changedFiles: [
+      ".codex/candidate-session.json",
+      "docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md",
+      "src/data/aiConversationLog.ts",
+    ],
+    verification: [
+      ".codex/candidate-session.json JSON 解析通过",
+      "C:\\nvm4w\\nodejs\\pnpm.CMD lint 通过",
+      "C:\\nvm4w\\nodejs\\pnpm.CMD verify:codex-log 通过",
+      "C:\\nvm4w\\nodejs\\pnpm.CMD verify:answer 通过，Vite 仅提示 chunk size warning",
+    ],
+  },
+  {
+    timestamp: "2026-05-18 01:11:22 CST (+0800)",
+    userInput: "安排中的安排详情中的相关上下文需要带上发送信息的时间",
+    aiFinalOutput:
+      "已输出《安排详情上下文发送时间展示计划》：确认 `ArrangementSourceRef.createdAt` 已保存来源消息时间，数据模型无需变更；计划在 `ArrangementDetailSheet` 的相关上下文卡片中展示“相对日期 + 时分”的发送时间，复用 `time.today`、`time.yesterday`、`time.dayBeforeYesterday` 翻译，并只改安排详情展示，不影响候选卡片、安排列表或持久化结构。",
+    changedFiles: ["无代码改动"],
+    verification: [
+      "已阅读 src/pages/Arrangements.tsx",
+      "已阅读 src/types/arrangement.ts",
+      "已阅读 src/data/arrangements.ts",
+      "计划阶段未修改代码",
+    ],
+  },
+  {
+    timestamp: "2026-05-18 01:15:10 CST (+0800)",
+    userInput:
+      "PLEASE IMPLEMENT THIS PLAN: 安排详情上下文发送时间展示计划。在安排详情页的“相关上下文”列表中，为每条来源消息显示发送时间，使用 `ArrangementSourceRef.createdAt`，展示格式为“相对日期 + 时分”，不修改数据模型和持久化结构。",
+    aiFinalOutput:
+      "已实现安排详情相关上下文的发送时间展示：每条来源上下文现在会在标题下方显示 `今天/昨天/前天/日期 + HH:mm`，并继续保留来源类型标签和正文内容。实现只修改 `ArrangementDetailSheet` 展示层，复用现有 `time.today`、`time.yesterday`、`time.dayBeforeYesterday` 翻译，不改 `ArrangementSourceRef`、`ArrangementItem` 或 localStorage 持久化结构。已通过浏览器在 `http://127.0.0.1:5173/` 打开安排详情确认可见时间，例如 `前天 13:31`。",
+    changedFiles: [
+      ".codex/candidate-session.json",
+      "docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md",
+      "src/data/aiConversationLog.ts",
+      "src/pages/Arrangements.tsx",
+    ],
+    verification: [
+      "C:\\nvm4w\\nodejs\\pnpm.CMD lint 通过",
+      "C:\\nvm4w\\nodejs\\pnpm.CMD build 通过，Vite 仅提示 chunk size warning",
+      "浏览器打开 http://127.0.0.1:5173/，进入安排详情，确认相关上下文显示发送时间",
+      "待执行 C:\\nvm4w\\nodejs\\pnpm.CMD verify:answer",
     ],
   },
 ];
