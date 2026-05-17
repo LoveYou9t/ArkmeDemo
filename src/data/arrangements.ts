@@ -15,19 +15,44 @@ export const arrangementCandidatesStorageEvent =
 
 export type ManualArrangementInput = {
   title: string;
-  timePreset: ArrangementTimePreset;
+  timeDraft: ArrangementTimeDraft;
   location?: string;
   people?: string;
   note?: string;
 };
 
 export type ArrangementTimePreset = "none" | "today" | "tomorrow" | "weekend";
+export type ArrangementTimePart = "morning" | "afternoon" | "evening";
+export type ArrangementTimeDraft =
+  | { kind: "none" }
+  | {
+      kind: "relativeDay";
+      day: "today" | "tomorrow";
+      part?: ArrangementTimePart;
+      clock?: string;
+    }
+  | {
+      kind: "weekday";
+      weekday: 0 | 1 | 2 | 3 | 4 | 5 | 6;
+      part?: ArrangementTimePart;
+      clock?: string;
+    }
+  | {
+      kind: "date";
+      date: string;
+      part?: ArrangementTimePart;
+      clock?: string;
+    };
 export type ArrangementCandidateStatus = "pending" | "confirmed" | "ignored";
 
 export type ArrangementCandidate = {
   id: string;
   title: string;
   note?: string;
+  timeDraft?: ArrangementTimeDraft;
+  location?: string;
+  people?: string[];
+  semanticKey?: string;
   sourceType: ArrangementSourceType;
   sourceRef: ArrangementSourceRef;
   status: ArrangementCandidateStatus;
@@ -41,9 +66,33 @@ export type ArrangementCandidate = {
 export type ArrangementSourceDraft = {
   title: string;
   note?: string;
+  timeDraft?: ArrangementTimeDraft;
+  semanticKey?: string;
   sourceType: ArrangementSourceType;
   sourceRef: ArrangementSourceRef;
 };
+
+export type AiArrangementCandidateDraft = {
+  title: string;
+  note?: string;
+  timeDraft?: ArrangementTimeDraft;
+  location?: string;
+  people?: string[];
+  confidence?: number;
+  reason?: string;
+};
+
+export type ArrangementNoteLocale = "zh-CN" | "zh-TW" | "en-US" | "ar-SA";
+
+export type ArrangementNoteParts = {
+  sourceLabel?: string;
+  confirmationText?: string;
+  modifierText?: string;
+  arrangementText?: string;
+  timeDraft?: ArrangementTimeDraft;
+};
+
+const supportedArrangementNoteLocales = ["zh-CN", "zh-TW", "en-US", "ar-SA"] as const;
 
 function readJsonValue(key: string): unknown {
   if (typeof window === "undefined") return null;
@@ -79,6 +128,207 @@ function normalizeStringArray(value: unknown) {
   return value.map(normalizeText).filter(Boolean);
 }
 
+export function getArrangementNoteLocale(locale: string): ArrangementNoteLocale {
+  const normalizedLocale = locale.trim();
+  const exactLocale = supportedArrangementNoteLocales.find(
+    (item) => item.toLowerCase() === normalizedLocale.toLowerCase()
+  );
+  if (exactLocale) return exactLocale;
+
+  if (normalizedLocale.toLowerCase().startsWith("zh-tw")) return "zh-TW";
+  if (normalizedLocale.toLowerCase().startsWith("zh")) return "zh-CN";
+  if (normalizedLocale.toLowerCase().startsWith("ar")) return "ar-SA";
+  return "en-US";
+}
+
+export function getArrangementNoteLanguageName(locale: string) {
+  const noteLocale = getArrangementNoteLocale(locale);
+  if (noteLocale === "zh-CN") return "Simplified Chinese";
+  if (noteLocale === "zh-TW") return "Traditional Chinese";
+  if (noteLocale === "ar-SA") return "Arabic";
+  return "English";
+}
+
+export function formatArrangementCandidateNote(
+  parts: ArrangementNoteParts,
+  locale: string
+) {
+  const noteLocale = getArrangementNoteLocale(locale);
+  const sourceLabel = normalizeText(parts.sourceLabel);
+  const confirmationText = normalizeText(parts.confirmationText);
+  const modifierText = normalizeText(parts.modifierText);
+  const arrangementText = normalizeArrangementActionText(
+    modifierText || parts.arrangementText || ""
+  );
+  const timeLabel = formatArrangementNoteTime(parts.timeDraft, noteLocale);
+  const actorLabel = sourceLabel || getDefaultArrangementActor(noteLocale);
+  const replyLabel = confirmationText || getDefaultArrangementReply(noteLocale);
+  const actionLabel =
+    arrangementText || getDefaultArrangementAction(Boolean(modifierText), noteLocale);
+
+  if (locale === "zh-CN") {
+    const prefix = timeLabel ? `${timeLabel}，` : "";
+    return `${prefix}${actorLabel}让你${actionLabel}，你回复“${replyLabel}”。`;
+  }
+
+  if (locale === "zh-TW") {
+    const prefix = timeLabel ? `${timeLabel}，` : "";
+    return `${prefix}${actorLabel}讓你${actionLabel}，你回覆「${replyLabel}」。`;
+  }
+
+  if (locale === "ar-SA") {
+    const prefix = timeLabel ? `${timeLabel}، ` : "";
+    return `${prefix}${actorLabel} طلب منك ${actionLabel}، ورددت "${replyLabel}".`;
+  }
+
+  const prefix = timeLabel ? `${timeLabel}, ` : "";
+  return `${prefix}${actorLabel} asked you to ${actionLabel}, and you replied "${replyLabel}."`;
+}
+
+export function sanitizeArrangementCandidateNote(note: string | undefined, locale = "zh-CN") {
+  const text = normalizeText(note);
+  if (!text) return "";
+
+  const noteLocale = getArrangementNoteLocale(locale);
+  const labels = getArrangementNoteLabels(noteLocale);
+  const cleanedText = text
+    .replace(/\r?\n/g, " ")
+    .split(/[；;]+/)
+    .map((line) =>
+      line
+        .trim()
+        .replace(/^Source\s*[:：]\s*/i, labels.source)
+        .replace(/^Confirmation\s+reply\s*[:：]\s*/i, labels.confirmation)
+        .replace(/^Confirmed\s*[:：]\s*/i, labels.confirmation)
+        .replace(/^Reschedule\s+request\s*[:：]\s*/i, labels.modifier)
+        .replace(/^Context\s*[:：]\s*/i, "")
+        .replace(/^Draft\s*[:：]\s*/i, "")
+        .replace(/\b(sourceRef|source draft|draft|context)\b/gi, "")
+        .replace(/\s+/g, " ")
+        .trim()
+    )
+    .filter(Boolean);
+
+  const firstLine = Array.from(new Set(cleanedText))[0] ?? "";
+  return normalizeSingleSentenceNote(firstLine, noteLocale);
+}
+
+function normalizeArrangementActionText(value: string) {
+  return value
+    .trim()
+    .replace(/^(你|您)/, "")
+    .replace(/^(能不能|能否|可以|可否|是否|要不要|要不|请|麻烦)/, "")
+    .replace(/[吗嘛么？?。！!]+$/g, "")
+    .trim();
+}
+
+function formatArrangementNoteTime(
+  timeDraft: ArrangementTimeDraft | undefined,
+  locale: ArrangementNoteLocale
+) {
+  if (!timeDraft || timeDraft.kind === "none") return "";
+
+  const part = "part" in timeDraft ? timeDraft.part : undefined;
+  const clock = "clock" in timeDraft ? timeDraft.clock : undefined;
+  const partLabel = getArrangementNoteTimePartLabel(part, locale);
+  const timeSuffix = clock || partLabel;
+
+  if (timeDraft.kind === "relativeDay") {
+    const dayLabel = getArrangementNoteRelativeDayLabel(timeDraft.day, locale);
+    return timeSuffix ? `${dayLabel}${locale === "en-US" ? " " : ""}${timeSuffix}` : dayLabel;
+  }
+
+  if (timeDraft.kind === "weekday") {
+    const weekdayLabel = getArrangementNoteWeekdayLabel(timeDraft.weekday, locale);
+    return timeSuffix
+      ? `${weekdayLabel}${locale === "en-US" ? " " : ""}${timeSuffix}`
+      : weekdayLabel;
+  }
+
+  return timeSuffix ? `${timeDraft.date} ${timeSuffix}` : timeDraft.date;
+}
+
+function getArrangementNoteRelativeDayLabel(day: "today" | "tomorrow", locale: ArrangementNoteLocale) {
+  if (locale === "zh-CN") return day === "today" ? "今天" : "明天";
+  if (locale === "zh-TW") return day === "today" ? "今天" : "明天";
+  if (locale === "ar-SA") return day === "today" ? "اليوم" : "غدا";
+  return day === "today" ? "today" : "tomorrow";
+}
+
+function getArrangementNoteTimePartLabel(
+  part: ArrangementTimePart | undefined,
+  locale: ArrangementNoteLocale
+) {
+  if (!part) return "";
+  if (locale === "zh-CN" || locale === "zh-TW") {
+    if (part === "morning") return "上午";
+    if (part === "afternoon") return "下午";
+    return "晚上";
+  }
+  if (locale === "ar-SA") {
+    if (part === "morning") return "صباحا";
+    if (part === "afternoon") return "بعد الظهر";
+    return "مساء";
+  }
+  if (part === "morning") return "morning";
+  if (part === "afternoon") return "afternoon";
+  return "evening";
+}
+
+function getArrangementNoteWeekdayLabel(weekday: 0 | 1 | 2 | 3 | 4 | 5 | 6, locale: ArrangementNoteLocale) {
+  if (locale === "zh-CN") return ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][weekday];
+  if (locale === "zh-TW") return ["週日", "週一", "週二", "週三", "週四", "週五", "週六"][weekday];
+  if (locale === "ar-SA") {
+    return ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت"][weekday];
+  }
+  return ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][weekday];
+}
+
+function getDefaultArrangementActor(locale: ArrangementNoteLocale) {
+  if (locale === "zh-CN") return "对方";
+  if (locale === "zh-TW") return "對方";
+  if (locale === "ar-SA") return "الطرف الآخر";
+  return "The other person";
+}
+
+function getDefaultArrangementAction(isModifier: boolean, locale: ArrangementNoteLocale) {
+  if (locale === "zh-CN") return isModifier ? "调整这项安排" : "确认这项安排";
+  if (locale === "zh-TW") return isModifier ? "調整這項安排" : "確認這項安排";
+  if (locale === "ar-SA") return isModifier ? "تعديل هذا الموعد" : "تأكيد هذا الموعد";
+  return isModifier ? "adjust this plan" : "confirm this plan";
+}
+
+function getDefaultArrangementReply(locale: ArrangementNoteLocale) {
+  if (locale === "zh-CN" || locale === "zh-TW") return "已确认";
+  if (locale === "ar-SA") return "تم";
+  return "confirmed";
+}
+
+function normalizeSingleSentenceNote(value: string, locale: ArrangementNoteLocale) {
+  const text = value.trim().replace(/\s+/g, " ");
+  if (!text) return "";
+  const firstSentence =
+    text.match(/^.*?[。！？.!?](?=\s|$)/)?.[0] ?? text.split(/[。！？.!?]/)[0] ?? text;
+  const sentence = firstSentence.trim();
+  if (!sentence) return "";
+  if (/[。！？.!?]$/.test(sentence)) return sentence;
+  if (locale === "zh-CN" || locale === "zh-TW") return `${sentence}。`;
+  return `${sentence}.`;
+}
+
+function getArrangementNoteLabels(locale: ArrangementNoteLocale) {
+  if (locale === "zh-CN") {
+    return { source: "来自", confirmation: "已确认：", modifier: "改期：" };
+  }
+  if (locale === "zh-TW") {
+    return { source: "來自", confirmation: "已確認：", modifier: "改期：" };
+  }
+  if (locale === "ar-SA") {
+    return { source: "من ", confirmation: "تم التأكيد: ", modifier: "تغيير الموعد: " };
+  }
+  return { source: "From ", confirmation: "Confirmed: ", modifier: "Rescheduled: " };
+}
+
 function isArrangementStatus(value: unknown): value is ArrangementStatus {
   return value === "active" || value === "done" || value === "later" || value === "archived";
 }
@@ -109,6 +359,54 @@ function isArrangementAiCapability(value: unknown): value is ArrangementAiCapabi
 
 function isArrangementCandidateStatus(value: unknown): value is ArrangementCandidateStatus {
   return value === "pending" || value === "confirmed" || value === "ignored";
+}
+
+function isArrangementTimePart(value: unknown): value is ArrangementTimePart {
+  return value === "morning" || value === "afternoon" || value === "evening";
+}
+
+function normalizeArrangementTimeDraft(value: unknown): ArrangementTimeDraft | undefined {
+  if (!value || typeof value !== "object") return undefined;
+
+  const draft = value as {
+    kind?: unknown;
+    day?: unknown;
+    weekday?: unknown;
+    date?: unknown;
+    part?: unknown;
+    clock?: unknown;
+  };
+  if (draft.kind === "none") return { kind: "none" };
+
+  const part = isArrangementTimePart(draft.part) ? draft.part : undefined;
+  const clock = normalizeText(draft.clock) || undefined;
+
+  if (draft.kind === "relativeDay" && (draft.day === "today" || draft.day === "tomorrow")) {
+    return { kind: "relativeDay", day: draft.day, ...(part ? { part } : {}), ...(clock ? { clock } : {}) };
+  }
+
+  if (
+    draft.kind === "weekday" &&
+    typeof draft.weekday === "number" &&
+    Number.isInteger(draft.weekday) &&
+    draft.weekday >= 0 &&
+    draft.weekday <= 6
+  ) {
+    return {
+      kind: "weekday",
+      weekday: draft.weekday as 0 | 1 | 2 | 3 | 4 | 5 | 6,
+      ...(part ? { part } : {}),
+      ...(clock ? { clock } : {}),
+    };
+  }
+
+  if (draft.kind === "date") {
+    const date = normalizeText(draft.date);
+    if (!date) return undefined;
+    return { kind: "date", date, ...(part ? { part } : {}), ...(clock ? { clock } : {}) };
+  }
+
+  return undefined;
 }
 
 function normalizeSourceRef(value: unknown, index: number): ArrangementSourceRef | null {
@@ -157,7 +455,19 @@ export function normalizeArrangementCandidate(
   return {
     id: normalizeText(candidate.id) || `candidate-${index}`,
     title,
-    ...(normalizeText(candidate.note) ? { note: normalizeText(candidate.note) } : {}),
+    ...(sanitizeArrangementCandidateNote(candidate.note)
+      ? { note: sanitizeArrangementCandidateNote(candidate.note) }
+      : {}),
+    ...(normalizeArrangementTimeDraft(candidate.timeDraft)
+      ? { timeDraft: normalizeArrangementTimeDraft(candidate.timeDraft) }
+      : {}),
+    ...(normalizeText(candidate.location)
+      ? { location: normalizeText(candidate.location) }
+      : {}),
+    people: normalizeStringArray(candidate.people),
+    ...(normalizeText(candidate.semanticKey)
+      ? { semanticKey: normalizeText(candidate.semanticKey) }
+      : {}),
     sourceType,
     sourceRef,
     status,
@@ -249,9 +559,11 @@ export function getInitialArrangementCandidates() {
   const parsedValue = readJsonValue(arrangementCandidatesStorageKey);
   if (!Array.isArray(parsedValue)) return [];
 
-  return parsedValue
+  return dedupeArrangementCandidates(
+    parsedValue
     .map(normalizeArrangementCandidate)
-    .filter((candidate): candidate is ArrangementCandidate => Boolean(candidate));
+      .filter((candidate): candidate is ArrangementCandidate => Boolean(candidate))
+  );
 }
 
 export function persistArrangements(arrangements: ArrangementItem[]) {
@@ -278,6 +590,128 @@ function getSourceRefKey(sourceRef: ArrangementSourceRef) {
   return sourceRef.messageId || sourceRef.id;
 }
 
+function getNormalizedCandidateTitle(title: string) {
+  return title.trim().replace(/\s+/g, "").toLocaleLowerCase();
+}
+
+function getCandidateSourceTitleKey(candidate: Pick<ArrangementCandidate, "sourceRef" | "title">) {
+  return `${getSourceRefKey(candidate.sourceRef)}::${getNormalizedCandidateTitle(candidate.title)}`;
+}
+
+function getCandidateSemanticKey(
+  candidate: Pick<ArrangementCandidate, "sourceRef" | "title" | "semanticKey">
+) {
+  return candidate.semanticKey || getCandidateSourceTitleKey(candidate);
+}
+
+function getCandidateConversationId(candidate: Pick<ArrangementCandidate, "sourceRef">) {
+  return candidate.sourceRef.conversationId;
+}
+
+function isShortConfirmationTitle(title: string) {
+  const normalized = title
+    .trim()
+    .replace(/[，。！？、；;：:,.!?\s~～…-]/g, "")
+    .replace(/[的呀啊呢哈哦啦喔]+$/g, "")
+    .toLocaleLowerCase();
+  return /^(可以|可以来|能|能来|好的|好|行|没问题|ok|okay)$/i.test(normalized);
+}
+
+function isShortConfirmationCandidate(candidate: Pick<ArrangementCandidate, "title">) {
+  return isShortConfirmationTitle(candidate.title);
+}
+
+function getArrangementCandidatePriority(candidate: ArrangementCandidate) {
+  return isShortConfirmationCandidate(candidate) ? 0 : 1;
+}
+
+function shouldMergeArrangementCandidates(
+  existingCandidate: ArrangementCandidate,
+  nextCandidate: ArrangementCandidate
+) {
+  if (getCandidateSemanticKey(existingCandidate) === getCandidateSemanticKey(nextCandidate)) {
+    return true;
+  }
+
+  const existingConversationId = getCandidateConversationId(existingCandidate);
+  const nextConversationId = getCandidateConversationId(nextCandidate);
+  if (!existingConversationId || existingConversationId !== nextConversationId) {
+    return false;
+  }
+
+  return (
+    isShortConfirmationCandidate(existingCandidate) !==
+    isShortConfirmationCandidate(nextCandidate)
+  );
+}
+
+function getArrangementCandidateMergeBase(
+  existingCandidate: ArrangementCandidate,
+  nextCandidate: ArrangementCandidate
+) {
+  return getArrangementCandidatePriority(nextCandidate) >
+    getArrangementCandidatePriority(existingCandidate)
+    ? nextCandidate
+    : existingCandidate;
+}
+
+function mergeCandidateNotes(previousNote?: string, nextNote?: string) {
+  const notes = [previousNote, nextNote]
+    .map((note) => note?.trim())
+    .filter((note): note is string => Boolean(note));
+  return Array.from(new Set(notes)).join("\n");
+}
+
+function mergeArrangementCandidate(
+  existingCandidate: ArrangementCandidate,
+  nextCandidate: ArrangementCandidate
+): ArrangementCandidate {
+  const baseCandidate = getArrangementCandidateMergeBase(existingCandidate, nextCandidate);
+  const dataCandidate = baseCandidate === nextCandidate ? nextCandidate : existingCandidate;
+  const otherCandidate = dataCandidate === nextCandidate ? existingCandidate : nextCandidate;
+
+  return {
+    ...baseCandidate,
+    title: baseCandidate.title,
+    note: sanitizeArrangementCandidateNote(
+      mergeCandidateNotes(existingCandidate.note, nextCandidate.note)
+    ) || undefined,
+    timeDraft: dataCandidate.timeDraft ?? otherCandidate.timeDraft,
+    location: dataCandidate.location ?? otherCandidate.location,
+    people:
+      dataCandidate.people && dataCandidate.people.length > 0
+        ? dataCandidate.people
+        : otherCandidate.people,
+    semanticKey: baseCandidate.semanticKey ?? dataCandidate.semanticKey ?? otherCandidate.semanticKey,
+    sourceType: baseCandidate.sourceType,
+    sourceRef: baseCandidate.sourceRef,
+    confidence: dataCandidate.confidence ?? otherCandidate.confidence,
+    reason: dataCandidate.reason ?? otherCandidate.reason,
+    createdBy:
+      existingCandidate.createdBy === "ai" || nextCandidate.createdBy === "ai"
+        ? "ai"
+        : "validation",
+    status:
+      existingCandidate.status === "confirmed" || existingCandidate.status === "pending"
+        ? existingCandidate.status
+        : "pending",
+    updatedAt: Date.now(),
+  };
+}
+
+function dedupeArrangementCandidates(candidates: ArrangementCandidate[]) {
+  return candidates.reduce<ArrangementCandidate[]>((dedupedCandidates, candidate) => {
+    const existingIndex = dedupedCandidates.findIndex((item) =>
+      shouldMergeArrangementCandidates(item, candidate)
+    );
+    if (existingIndex < 0) return [...dedupedCandidates, candidate];
+
+    return dedupedCandidates.map((item, index) =>
+      index === existingIndex ? mergeArrangementCandidate(item, candidate) : item
+    );
+  }, []);
+}
+
 export function createArrangementCandidateFromSourceDraft(
   draft: ArrangementSourceDraft
 ): ArrangementCandidate {
@@ -287,7 +721,11 @@ export function createArrangementCandidateFromSourceDraft(
   return {
     id: `candidate-${draft.sourceRef.type}-${getSourceRefKey(draft.sourceRef)}`,
     title,
-    ...(draft.note?.trim() ? { note: draft.note.trim() } : {}),
+    ...(sanitizeArrangementCandidateNote(draft.note)
+      ? { note: sanitizeArrangementCandidateNote(draft.note) }
+      : {}),
+    ...(draft.timeDraft ? { timeDraft: draft.timeDraft } : {}),
+    ...(draft.semanticKey ? { semanticKey: draft.semanticKey } : {}),
     sourceType: draft.sourceType,
     sourceRef: draft.sourceRef,
     status: "pending",
@@ -302,9 +740,8 @@ export function saveArrangementCandidateFromSourceDraft(
 ): ArrangementCandidate {
   const currentCandidates = getInitialArrangementCandidates();
   const candidate = createArrangementCandidateFromSourceDraft(draft);
-  const sourceKey = getSourceRefKey(candidate.sourceRef);
-  const existingIndex = currentCandidates.findIndex(
-    (item) => getSourceRefKey(item.sourceRef) === sourceKey
+  const existingIndex = currentCandidates.findIndex((item) =>
+    shouldMergeArrangementCandidates(item, candidate)
   );
 
   if (existingIndex < 0) {
@@ -312,28 +749,75 @@ export function saveArrangementCandidateFromSourceDraft(
     return candidate;
   }
 
-  const existingCandidate = currentCandidates[existingIndex];
-  if (
-    existingCandidate.status === "pending" ||
-    existingCandidate.status === "confirmed"
-  ) {
-    return existingCandidate;
-  }
-
-  const restoredCandidate: ArrangementCandidate = {
-    ...existingCandidate,
-    title: candidate.title,
-    note: candidate.note,
-    sourceType: candidate.sourceType,
-    sourceRef: candidate.sourceRef,
-    status: "pending",
-    updatedAt: Date.now(),
-  };
+  const restoredCandidate = mergeArrangementCandidate(
+    currentCandidates[existingIndex],
+    candidate
+  );
   const nextCandidates = currentCandidates.map((item, index) =>
     index === existingIndex ? restoredCandidate : item
   );
   persistArrangementCandidates(nextCandidates);
   return restoredCandidate;
+}
+
+export function createArrangementCandidateFromAiDraft(
+  draft: AiArrangementCandidateDraft,
+  sourceDraft: ArrangementSourceDraft
+): ArrangementCandidate {
+  const timestamp = Date.now();
+  const title = draft.title.trim();
+  const sourceKey = getSourceRefKey(sourceDraft.sourceRef);
+  const titleKey = getNormalizedCandidateTitle(title);
+
+  return {
+    id: `candidate-ai-${sourceDraft.sourceRef.type}-${sourceKey}-${titleKey || timestamp}`,
+    title,
+    ...(sanitizeArrangementCandidateNote(draft.note)
+      ? { note: sanitizeArrangementCandidateNote(draft.note) }
+      : {}),
+    ...(draft.timeDraft ?? sourceDraft.timeDraft
+      ? { timeDraft: draft.timeDraft ?? sourceDraft.timeDraft }
+      : {}),
+    ...(draft.location?.trim() ? { location: draft.location.trim() } : {}),
+    people: normalizeStringArray(draft.people),
+    ...(sourceDraft.semanticKey ? { semanticKey: sourceDraft.semanticKey } : {}),
+    sourceType: sourceDraft.sourceType,
+    sourceRef: sourceDraft.sourceRef,
+    status: "pending",
+    ...(typeof draft.confidence === "number" && Number.isFinite(draft.confidence)
+      ? { confidence: Math.min(1, Math.max(0, draft.confidence)) }
+      : {}),
+    ...(draft.reason?.trim() ? { reason: draft.reason.trim() } : {}),
+    createdBy: "ai",
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+export function saveArrangementCandidateFromAiDraft(
+  draft: AiArrangementCandidateDraft,
+  sourceDraft: ArrangementSourceDraft
+): ArrangementCandidate {
+  const currentCandidates = getInitialArrangementCandidates();
+  const candidate = createArrangementCandidateFromAiDraft(draft, sourceDraft);
+  const existingIndex = currentCandidates.findIndex((item) =>
+    shouldMergeArrangementCandidates(item, candidate)
+  );
+
+  if (existingIndex >= 0) {
+    const mergedCandidate = mergeArrangementCandidate(
+      currentCandidates[existingIndex],
+      candidate
+    );
+    const nextCandidates = currentCandidates.map((item, index) =>
+      index === existingIndex ? mergedCandidate : item
+    );
+    persistArrangementCandidates(nextCandidates);
+    return mergedCandidate;
+  }
+
+  persistArrangementCandidates([candidate, ...currentCandidates]);
+  return candidate;
 }
 
 export function updateArrangementCandidateStatus(
@@ -351,7 +835,7 @@ export function updateArrangementCandidateStatus(
 
 export function createManualArrangement(input: ManualArrangementInput): ArrangementItem {
   const timestamp = Date.now();
-  const timeFields = getArrangementTimeFieldsForPreset(input.timePreset, timestamp);
+  const timeFields = getArrangementTimeFieldsFromDraft(input.timeDraft, timestamp);
   const title = input.title.trim();
 
   return {
@@ -373,7 +857,7 @@ export function createManualArrangement(input: ManualArrangementInput): Arrangem
       },
     ],
     aiCapability: "userOnly",
-    attentionScore: input.timePreset === "none" ? 20 : 50,
+    attentionScore: input.timeDraft.kind === "none" ? 20 : 50,
     createdAt: timestamp,
     updatedAt: timestamp,
   };
@@ -384,7 +868,7 @@ export function createArrangementFromCandidate(
   input: ManualArrangementInput
 ): ArrangementItem {
   const timestamp = Date.now();
-  const timeFields = getArrangementTimeFieldsForPreset(input.timePreset, timestamp);
+  const timeFields = getArrangementTimeFieldsFromDraft(input.timeDraft, timestamp);
   const title = input.title.trim();
 
   return {
@@ -398,7 +882,7 @@ export function createArrangementFromCandidate(
     sourceType: candidate.sourceType,
     sourceRefs: [candidate.sourceRef],
     aiCapability: candidate.createdBy === "ai" ? "aiAssist" : "userOnly",
-    attentionScore: input.timePreset === "none" ? 30 : 60,
+    attentionScore: input.timeDraft.kind === "none" ? 30 : 60,
     createdAt: timestamp,
     updatedAt: timestamp,
   };
@@ -407,28 +891,37 @@ export function createArrangementFromCandidate(
 export function getArrangementTimeFieldsForPreset(
   preset: ArrangementTimePreset,
   now = Date.now()
-): Pick<ArrangementItem, "timeKind" | "startAt" | "fuzzyTimeLabel"> {
-  if (preset === "today") {
-    return { timeKind: "deadline", startAt: now, fuzzyTimeLabel: "今天" };
+): Pick<ArrangementItem, "timeKind" | "startAt" | "endAt" | "fuzzyTimeLabel"> {
+  return getArrangementTimeFieldsFromDraft(getTimeDraftFromPreset(preset), now);
+}
+
+export function getTimeDraftFromPreset(preset: ArrangementTimePreset): ArrangementTimeDraft {
+  if (preset === "today") return { kind: "relativeDay", day: "today" };
+  if (preset === "tomorrow") return { kind: "relativeDay", day: "tomorrow" };
+  if (preset === "weekend") return { kind: "weekday", weekday: 6 };
+  return { kind: "none" };
+}
+
+export function getArrangementTimeFieldsFromDraft(
+  draft: ArrangementTimeDraft,
+  now = Date.now()
+): Pick<ArrangementItem, "timeKind" | "startAt" | "endAt" | "fuzzyTimeLabel"> {
+  if (draft.kind === "none") {
+    return { timeKind: "none", fuzzyTimeLabel: "还没有时间" };
   }
 
-  if (preset === "tomorrow") {
-    return {
-      timeKind: "deadline",
-      startAt: now + 24 * 60 * 60 * 1000,
-      fuzzyTimeLabel: "明天",
-    };
-  }
+  const targetDate = getDateForTimeDraft(draft, now);
+  if (!targetDate) return { timeKind: "none", fuzzyTimeLabel: "还没有时间" };
 
-  if (preset === "weekend") {
-    return {
-      timeKind: "fuzzy",
-      startAt: getNextWeekendTime(now),
-      fuzzyTimeLabel: "周末",
-    };
-  }
+  const hasClock = Boolean(parseClock(draft.clock));
+  const hasPart = "part" in draft && Boolean(draft.part);
+  const timeKind: ArrangementTimeKind = hasClock ? "deadline" : hasPart ? "fuzzy" : "fuzzy";
 
-  return { timeKind: "none", fuzzyTimeLabel: "还没有时间" };
+  return {
+    timeKind,
+    startAt: targetDate.getTime(),
+    fuzzyTimeLabel: formatTimeDraftLabel(draft, targetDate, now),
+  };
 }
 
 export function getSourceTypeLabel(type: ArrangementSourceType) {
@@ -445,6 +938,96 @@ function splitPeople(value?: string) {
     .split(/[、,，\s]+/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function getDateForTimeDraft(draft: ArrangementTimeDraft, now: number) {
+  const baseDate = new Date(now);
+
+  if (draft.kind === "relativeDay") {
+    if (draft.day === "tomorrow") baseDate.setDate(baseDate.getDate() + 1);
+    return applyDraftTime(baseDate, draft.part, draft.clock);
+  }
+
+  if (draft.kind === "weekday") {
+    const targetDate = new Date(now);
+    const currentDay = targetDate.getDay() as 0 | 1 | 2 | 3 | 4 | 5 | 6;
+    const daysUntilTarget = (draft.weekday - currentDay + 7) % 7 || 7;
+    targetDate.setDate(targetDate.getDate() + daysUntilTarget);
+    return applyDraftTime(targetDate, draft.part, draft.clock);
+  }
+
+  if (draft.kind === "date") {
+    const [year, month, day] = draft.date.split("-").map(Number);
+    if (!year || !month || !day) return null;
+    return applyDraftTime(new Date(year, month - 1, day), draft.part, draft.clock);
+  }
+
+  return null;
+}
+
+function applyDraftTime(date: Date, part?: ArrangementTimePart, clock?: string) {
+  const targetDate = new Date(date);
+  const parsedClock = parseClock(clock);
+  if (parsedClock) {
+    targetDate.setHours(parsedClock.hour, parsedClock.minute, 0, 0);
+    return targetDate;
+  }
+
+  const defaultHour = part === "afternoon" ? 14 : part === "evening" ? 19 : 9;
+  targetDate.setHours(defaultHour, 0, 0, 0);
+  return targetDate;
+}
+
+function parseClock(clock?: string) {
+  if (!clock) return null;
+  const match = clock.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return { hour, minute };
+}
+
+function formatTimeDraftLabel(draft: ArrangementTimeDraft, targetDate: Date, now: number) {
+  const clock = parseClock("clock" in draft ? draft.clock : undefined);
+  const partLabel = "part" in draft ? getTimePartLabel(draft.part) : "";
+  const clockLabel = clock ? `${padNumber(clock.hour)}:${padNumber(clock.minute)}` : "";
+  const suffix = clockLabel || partLabel;
+
+  if (draft.kind === "relativeDay") {
+    const dayLabel = draft.day === "today" ? "今天" : "明天";
+    return suffix ? `${dayLabel}${suffix}` : dayLabel;
+  }
+
+  if (draft.kind === "weekday") {
+    const label = getWeekdayLabel(targetDate.getDay());
+    return suffix ? `${label}${suffix}` : label;
+  }
+
+  const dateLabel = formatShortDate(targetDate, now);
+  return suffix ? `${dateLabel} ${suffix}` : dateLabel;
+}
+
+function getTimePartLabel(part?: ArrangementTimePart) {
+  if (part === "morning") return "上午";
+  if (part === "afternoon") return "下午";
+  if (part === "evening") return "晚上";
+  return "";
+}
+
+function getWeekdayLabel(weekday: number) {
+  return ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][weekday] ?? "本周";
+}
+
+function formatShortDate(date: Date, now: number) {
+  const current = new Date(now);
+  const prefix =
+    date.getFullYear() === current.getFullYear() ? "" : `${date.getFullYear()}年`;
+  return `${prefix}${date.getMonth() + 1}月${date.getDate()}日`;
+}
+
+function padNumber(value: number) {
+  return String(value).padStart(2, "0");
 }
 
 function getNextWeekendTime(now: number) {

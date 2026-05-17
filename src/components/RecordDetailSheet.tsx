@@ -8,6 +8,10 @@ type RecordDetailSheetProps = {
   onClose: () => void;
   onOpenSource?: (source: RecordSourceConversation) => void;
   onCreateArrangementCandidate?: (record: RecordItem) => void;
+  onRecognizeArrangementCandidate?: (record: RecordItem) => void;
+  arrangementAiState?: "idle" | "loading" | "success" | "empty" | "error" | "unconfigured";
+  arrangementAiMessage?: string;
+  onOpenAiSettings?: () => void;
 };
 
 function formatFullDateTime(timestamp: number) {
@@ -30,6 +34,10 @@ export default function RecordDetailSheet({
   onClose,
   onOpenSource,
   onCreateArrangementCandidate,
+  onRecognizeArrangementCandidate,
+  arrangementAiState = "idle",
+  arrangementAiMessage = "",
+  onOpenAiSettings,
 }: RecordDetailSheetProps) {
   const { t } = usePreferences();
 
@@ -46,6 +54,8 @@ export default function RecordDetailSheet({
   const canCreateArrangementCandidate =
     Boolean(onCreateArrangementCandidate) &&
     (record.sourceConversation?.type === "self" || record.sourceConversation?.type === "test");
+  const canRecognizeArrangementCandidate =
+    Boolean(onRecognizeArrangementCandidate) && canCreateArrangementCandidate;
 
   const handleOpenSource = () => {
     if (!record.sourceConversation || !onOpenSource) return;
@@ -84,18 +94,7 @@ export default function RecordDetailSheet({
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-text-tertiary transition hover:bg-hover-overlay hover:text-text active:scale-[0.96]"
               aria-label={t("recordSnapshot.close")}
             >
-              <svg
-                className="h-4 w-4"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M18 6 6 18M6 6l12 12" />
-              </svg>
+              <CloseIcon />
             </button>
           </div>
         </header>
@@ -106,10 +105,7 @@ export default function RecordDetailSheet({
           </div>
 
           <div className="grid grid-cols-4 gap-2 border-b border-border-light py-4 text-center">
-            <DetailMetric
-              label={t("recordDetail.wordCount")}
-              value={String(textLength)}
-            />
+            <DetailMetric label={t("recordDetail.wordCount")} value={String(textLength)} />
             <DetailMetric
               label={t("recordDetail.duration")}
               value={`${durationSeconds}${t("recordDetail.secondsSuffix")}`}
@@ -132,13 +128,34 @@ export default function RecordDetailSheet({
 
           <div className="space-y-3 py-4">
             {canCreateArrangementCandidate && (
-              <button
-                type="button"
-                onClick={handleCreateArrangementCandidate}
-                className="flex h-11 w-full items-center justify-center rounded-[12px] bg-primary-soft text-[14px] font-medium text-primary transition active:scale-[0.98]"
-              >
-                加入安排候选
-              </button>
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={handleCreateArrangementCandidate}
+                  className="flex h-11 w-full items-center justify-center rounded-[12px] bg-primary-soft text-[14px] font-medium text-primary transition active:scale-[0.98]"
+                >
+                  {t("recordDetail.arrangement.addCandidate")}
+                </button>
+                {canRecognizeArrangementCandidate && (
+                  <button
+                    type="button"
+                    onClick={
+                      arrangementAiState === "unconfigured"
+                        ? onOpenAiSettings
+                        : () => onRecognizeArrangementCandidate?.(record)
+                    }
+                    disabled={arrangementAiState === "loading"}
+                    className="flex h-11 w-full items-center justify-center rounded-[12px] bg-primary text-[14px] font-medium text-on-primary transition active:scale-[0.98] disabled:opacity-70"
+                  >
+                    {getArrangementAiActionLabel(arrangementAiState, t)}
+                  </button>
+                )}
+                {arrangementAiMessage && (
+                  <p className="rounded-[10px] bg-[var(--record-detail-muted-bg)] px-3 py-2 text-[12px] leading-5 text-text-tertiary">
+                    {arrangementAiMessage}
+                  </p>
+                )}
+              </div>
             )}
             <DetailRow
               label={t("recordDetail.sourceLocation")}
@@ -150,18 +167,7 @@ export default function RecordDetailSheet({
                     className="inline-flex max-w-full items-center rounded-[8px] border border-[var(--record-topic-border)] px-2 py-1 text-left text-[12px] leading-4 text-text-tertiary transition hover:text-text-muted active:scale-[0.99]"
                   >
                     <span className="min-w-0 truncate">{sourceLabel}</span>
-                    <svg
-                      className="ml-1 h-3.5 w-3.5 shrink-0"
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
-                      <path d="M6 4l4 4-4 4" />
-                    </svg>
+                    <ChevronRightIcon />
                   </button>
                 ) : (
                   sourceLabel
@@ -196,6 +202,16 @@ function DetailMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
+function getArrangementAiActionLabel(
+  state: NonNullable<RecordDetailSheetProps["arrangementAiState"]>,
+  t: (key: string) => string
+) {
+  if (state === "loading") return t("recordDetail.arrangement.recognizing");
+  if (state === "unconfigured") return t("recordDetail.arrangement.configureFirst");
+  if (state === "success") return t("recordDetail.arrangement.recognizeAgain");
+  return t("recordDetail.arrangement.aiRecognize");
+}
+
 function DetailRow({
   label,
   value,
@@ -213,5 +229,39 @@ function DetailRow({
       </p>
       <div className="min-w-0 flex-1 text-[14px] leading-6 text-text">{value}</div>
     </div>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg
+      className="h-4 w-4"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M18 6 6 18M6 6l12 12" />
+    </svg>
+  );
+}
+
+function ChevronRightIcon() {
+  return (
+    <svg
+      className="ml-1 h-3.5 w-3.5 shrink-0"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M6 4l4 4-4 4" />
+    </svg>
   );
 }

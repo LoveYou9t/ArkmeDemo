@@ -5,13 +5,34 @@ import ChatInput from "@/components/ChatInput";
 import ChatList from "@/components/ChatList";
 import RecordDetailSheet from "@/components/RecordDetailSheet";
 import RecordFullDetailScreen from "@/components/RecordFullDetailScreen";
+import MetaPill from "@/components/MetaPill";
 import SearchIcon from "@/components/SearchIcon";
 import Arrangements from "@/pages/Arrangements";
 import Records from "@/pages/Records";
+import {
+  defaultAiApiSettings,
+  isAiApiConfigured,
+  persistAiApiSettings,
+  useAiApiSettings,
+  type AiApiSettings,
+} from "@/data/aiApiSettings";
+import {
+  appendAiRecognitionDiagnostic,
+  clearAiRecognitionDiagnostics,
+  useAiRecognitionDiagnostics,
+  type AiRecognitionDiagnosticAction,
+  type AiRecognitionDiagnosticStage,
+} from "@/data/aiRecognitionDiagnostics";
 import { aiConversationLogEntries } from "@/data/aiConversationLog";
 import {
+  saveArrangementCandidateFromAiDraft,
   saveArrangementCandidateFromSourceDraft,
+  formatArrangementCandidateNote,
+  getArrangementNoteLanguageName,
+  sanitizeArrangementCandidateNote,
   type ArrangementSourceDraft,
+  type ArrangementTimeDraft,
+  type ArrangementTimePart,
 } from "@/data/arrangements";
 import { useCandidateProfile } from "@/data/candidateProfile";
 import {
@@ -38,6 +59,11 @@ import {
 } from "@/data/testConversations";
 import { formatBubbleTime, formatTimeLabel } from "@/lib/time";
 import { cn } from "@/lib/utils";
+import {
+  AiRecognitionError,
+  getAiRecognitionConnectionSnapshot,
+  recognizeArrangementCandidate,
+} from "@/services/arrangementAi";
 import {
   accentColorOptions,
   getLocaleDisplayName,
@@ -75,6 +101,8 @@ const createdSelfRecordsStorageKey = "arkme-demo.selfRecords";
 const searchHistoryStorageKey = "arkme-demo.searchHistory";
 const aiConversationTotalCount = aiConversationLogEntries.length;
 const maxSearchHistoryCount = 4;
+const recentArrangementScanWindowMs = 7 * 24 * 60 * 60 * 1000;
+const recentArrangementScanLimit = 20;
 
 type QuickSearchType = "image" | "audio" | "link" | "file" | "longArticle" | "contact";
 
@@ -111,6 +139,18 @@ type HomeMessagePreview = {
   summary: TestConversationSummary;
   message: TestMessage;
   unreadCount: number;
+};
+
+type RecentArrangementScanState = {
+  state: "idle" | "scanning" | "success" | "empty" | "error" | "unconfigured";
+  message: string;
+};
+
+type LocalArrangementSemanticResult = {
+  baseRecord: RecordItem;
+  modifierRecord?: RecordItem;
+  confirmationRecord?: RecordItem;
+  timeDraft?: ArrangementTimeDraft;
 };
 
 const quickSearchTypes: QuickSearchType[] = [
@@ -305,6 +345,231 @@ function countRecordTextLength(value: string) {
   return Array.from(value.trim()).length;
 }
 
+function isSameRecordConversation(a: RecordItem, b: RecordItem) {
+  const aSource = a.sourceConversation;
+  const bSource = b.sourceConversation;
+  if (!aSource || !bSource) return false;
+  if (aSource.type !== bSource.type) return false;
+  if (aSource.conversationId || bSource.conversationId) {
+    return aSource.conversationId === bSource.conversationId;
+  }
+  return aSource.type === "self" && bSource.type === "self";
+}
+
+function isLocalShortConfirmationText(value: string) {
+  const normalized = value
+    .trim()
+    .replace(/[，。！？、；;：:,.!?\s~～…-]/g, "")
+    .replace(/[的呀啊呢哈哦啦喔]+$/g, "")
+    .toLowerCase();
+  return /^(可以|可以来|能|能来|好的|好|行|没问题|ok|okay)$/i.test(
+    normalized
+  );
+}
+
+function isLocalTimeChangeText(value: string) {
+  return /(?:改到|改成|换到|调整到|调到|改为|改在)/.test(value);
+}
+
+function isLocalTestConversationRecord(record: RecordItem): record is TestConversationRecord {
+  return (
+    record.sourceConversation?.type === "test" &&
+    "sender" in record &&
+    (record.sender === "identity" || record.sender === "demo")
+  );
+}
+
+function getPreviousIdentityRecords(record: RecordItem, contextRecords: RecordItem[]) {
+  return contextRecords
+    .filter(
+      (item) =>
+        item.uid !== record.uid &&
+        item.send_at < record.send_at &&
+        isSameRecordConversation(item, record) &&
+        isLocalTestConversationRecord(item) &&
+        item.sender === "identity"
+    )
+    .sort((a, b) => b.send_at - a.send_at);
+}
+
+function getLocalArrangementSemanticResult(
+  record: RecordItem,
+  contextRecords: RecordItem[]
+): LocalArrangementSemanticResult {
+  const directTimeDraft = parseLocalArrangementTimeDraftFromText(record.text_content);
+  if (!isLocalShortConfirmationText(record.text_content)) {
+    return { baseRecord: record, timeDraft: directTimeDraft };
+  }
+
+  if (!isLocalTestConversationRecord(record)) {
+    return { baseRecord: record, timeDraft: directTimeDraft };
+  }
+
+  const previousIdentityRecords = getPreviousIdentityRecords(record, contextRecords);
+  const latestIdentityRecord = previousIdentityRecords[0];
+  if (!latestIdentityRecord) {
+    return { baseRecord: record, confirmationRecord: record, timeDraft: directTimeDraft };
+  }
+
+  if (!isLocalTimeChangeText(latestIdentityRecord.text_content)) {
+    return {
+      baseRecord: latestIdentityRecord,
+      confirmationRecord: record,
+      timeDraft: parseLocalArrangementTimeDraftFromText(latestIdentityRecord.text_content),
+    };
+  }
+
+  const baseRecord =
+    previousIdentityRecords.find((item) => !isLocalTimeChangeText(item.text_content)) ??
+    latestIdentityRecord;
+  const baseTimeDraft = parseLocalArrangementTimeDraftFromText(baseRecord.text_content);
+  const modifierTimeDraft = parseLocalArrangementTimeDraftFromText(
+    latestIdentityRecord.text_content
+  );
+
+  return {
+    baseRecord,
+    modifierRecord: latestIdentityRecord,
+    confirmationRecord: record,
+    timeDraft: mergeLocalArrangementTimeDraft(
+      baseTimeDraft,
+      modifierTimeDraft,
+      latestIdentityRecord.text_content
+    ),
+  };
+}
+
+function parseLocalArrangementTimeDraftFromText(
+  text: string
+): ArrangementTimeDraft | undefined {
+  const clockMatch = /([01]?\d|2[0-3])[:\uFF1A]([0-5]\d)/.exec(text);
+  const clock = clockMatch
+    ? `${clockMatch[1].padStart(2, "0")}:${clockMatch[2]}`
+    : undefined;
+  const part = getLocalArrangementTimePart(text);
+
+  if (text.includes("\u540E\u5929")) {
+    return {
+      kind: "date",
+      date: getLocalDateStringFromOffset(2),
+      ...(part ? { part } : {}),
+      ...(clock ? { clock } : {}),
+    };
+  }
+
+  if (text.includes("\u660E\u5929")) {
+    return {
+      kind: "relativeDay",
+      day: "tomorrow",
+      ...(part ? { part } : {}),
+      ...(clock ? { clock } : {}),
+    };
+  }
+
+  if (text.includes("\u4ECA\u5929")) {
+    return {
+      kind: "relativeDay",
+      day: "today",
+      ...(part ? { part } : {}),
+      ...(clock ? { clock } : {}),
+    };
+  }
+
+  const weekday = getLocalArrangementWeekday(text);
+  if (weekday !== undefined) {
+    return {
+      kind: "weekday",
+      weekday,
+      ...(part ? { part } : {}),
+      ...(clock ? { clock } : {}),
+    };
+  }
+
+  if (clock || part) {
+    return {
+      kind: "relativeDay",
+      day: "today",
+      ...(part ? { part } : {}),
+      ...(clock ? { clock } : {}),
+    };
+  }
+
+  return undefined;
+}
+
+function getLocalArrangementTimePart(text: string): ArrangementTimePart | undefined {
+  if (/\u4E0A\u5348|\u65E9\u4E0A|\u65E9\u6668|\u4E2D\u5348/.test(text)) return "morning";
+  if (/\u4E0B\u5348|\u5348\u540E/.test(text)) return "afternoon";
+  if (/\u665A\u4E0A|\u4ECA\u665A|\u591C\u91CC|\u591C\u95F4/.test(text)) return "evening";
+  return undefined;
+}
+
+function mergeLocalArrangementTimeDraft(
+  baseDraft: ArrangementTimeDraft | undefined,
+  overrideDraft: ArrangementTimeDraft | undefined,
+  overrideText = ""
+): ArrangementTimeDraft | undefined {
+  if (!overrideDraft || overrideDraft.kind === "none") return baseDraft;
+  if (!baseDraft || baseDraft.kind === "none") return overrideDraft;
+  if (overrideDraft.kind !== "relativeDay") return overrideDraft;
+
+  const hasExplicitOverrideDay = /\u4ECA\u5929|\u660E\u5929|\u540E\u5929|\u672C\u5468|\u8FD9\u5468|\u4E0B\u5468|\u5468[\u4E00\u4E8C\u4E09\u56DB\u4E94\u516D\u65E5\u5929]/.test(
+    overrideText
+  );
+  if (hasExplicitOverrideDay) return overrideDraft;
+
+  if (baseDraft.kind === "relativeDay") {
+    return {
+      ...overrideDraft,
+      day: baseDraft.day,
+      part: overrideDraft.part ?? baseDraft.part,
+      clock: overrideDraft.clock ?? baseDraft.clock,
+    };
+  }
+
+  if (baseDraft.kind === "weekday") {
+    return {
+      kind: "weekday",
+      weekday: baseDraft.weekday,
+      part: overrideDraft.part ?? baseDraft.part,
+      clock: overrideDraft.clock ?? baseDraft.clock,
+    };
+  }
+
+  return {
+    kind: "date",
+    date: baseDraft.date,
+    part: overrideDraft.part ?? baseDraft.part,
+    clock: overrideDraft.clock ?? baseDraft.clock,
+  };
+}
+
+function getLocalArrangementWeekday(
+  text: string
+): 0 | 1 | 2 | 3 | 4 | 5 | 6 | undefined {
+  const match = /(?:\u672C\u5468|\u8FD9\u5468|\u4E0B\u5468|\u5468|\u661F\u671F|\u793C\u62DC)([\u4E00\u4E8C\u4E09\u56DB\u4E94\u516D\u65E5\u5929])/u.exec(text);
+  if (!match) return undefined;
+  const weekdayMap: Record<string, 0 | 1 | 2 | 3 | 4 | 5 | 6> = {
+    "\u65E5": 0,
+    "\u5929": 0,
+    "\u4E00": 1,
+    "\u4E8C": 2,
+    "\u4E09": 3,
+    "\u56DB": 4,
+    "\u4E94": 5,
+    "\u516D": 6,
+  };
+  return weekdayMap[match[1]];
+}
+function getLocalDateStringFromOffset(dayOffset: number) {
+  const date = new Date();
+  date.setDate(date.getDate() + dayOffset);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function formatNumberForLocale(value: number, locale: string) {
   try {
     return new Intl.NumberFormat(locale).format(value);
@@ -336,7 +601,7 @@ function shouldRequestBrowserNotificationPermission() {
 }
 
 export default function Home({ currentPage, onNavigate }: HomeProps) {
-  const { t } = usePreferences();
+  const { resolvedLocale, t } = usePreferences();
   const [showSearch, setShowSearch] = React.useState(false);
   const [showMenu, setShowMenu] = React.useState(false);
   const [showAnswerGuide, setShowAnswerGuide] = React.useState(false);
@@ -350,9 +615,9 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
   const [sendToSelfTargetUid, setSendToSelfTargetUid] = React.useState<string | null>(null);
   const [activeTestIdentityId, setActiveTestIdentityId] = React.useState<string | null>(null);
   const [testConversationTargetUid, setTestConversationTargetUid] = React.useState<string | null>(null);
-  const [settingsView, setSettingsView] = React.useState<null | "settings" | "appearance" | "about">(
-    null
-  );
+  const [settingsView, setSettingsView] = React.useState<
+    null | "settings" | "appearance" | "ai" | "about"
+  >(null);
   const [searchQuery, setSearchQuery] = React.useState("");
   const [searchHistory, setSearchHistory] = React.useState(getInitialSearchHistory);
   const [recordDetail, setRecordDetail] = React.useState<RecordItem | null>(null);
@@ -369,6 +634,33 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
   const [testMessages, setTestMessages] = React.useState(getInitialTestMessages);
   const [testReadState, setTestReadState] =
     React.useState<TestReadState>(getInitialTestReadState);
+  const aiApiSettings = useAiApiSettings();
+  const [arrangementAiStatus, setArrangementAiStatus] = React.useState<{
+    recordUid: string;
+    state: "idle" | "loading" | "success" | "empty" | "error" | "unconfigured";
+    message: string;
+  } | null>(null);
+  const [recentArrangementScanState, setRecentArrangementScanState] =
+    React.useState<RecentArrangementScanState>({
+      state: "idle",
+      message: "",
+    });
+  const getArrangementAiStateForRecord = React.useCallback(
+    (record: RecordItem | null) => {
+      if (!record) return "idle";
+      if (arrangementAiStatus?.recordUid === record.uid) return arrangementAiStatus.state;
+      if (!isAiApiConfigured(aiApiSettings)) return "unconfigured";
+      return "idle";
+    },
+    [aiApiSettings, arrangementAiStatus]
+  );
+  const getArrangementAiMessageForRecord = React.useCallback(
+    (record: RecordItem | null) =>
+      record && arrangementAiStatus?.recordUid === record.uid
+        ? arrangementAiStatus.message
+        : "",
+    [arrangementAiStatus]
+  );
   const initializedBrowserNotificationMessagesRef = React.useRef(false);
   const browserNotifiedMessageIdsRef = React.useRef<Set<string>>(new Set());
 
@@ -610,7 +902,7 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
             conversationId,
             conversationType: "private",
             title: identity.name,
-            subtitle: identity.note || "测试私聊",
+            subtitle: identity.note || "Private chat",
             avatarLabel: identity.avatarLabel,
             color: identity.color,
             identity,
@@ -658,7 +950,7 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
               conversationId: group.id,
               conversationType: "group",
               title: group.name,
-              subtitle: group.note || `${memberIdentities.length} 位成员`,
+              subtitle: group.note || `${memberIdentities.length} members`,
               avatarLabel: group.avatarLabel,
               color: group.color,
               group,
@@ -669,7 +961,7 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
                 conversationId: group.id,
                 conversationType: "group",
                 identityId: demoSenderIdentityId,
-                text: "群聊能力已开启，可从后台发送群消息测试。",
+                text: "No group messages yet",
                 sentAt: group.createdAt,
                 sender: "demo",
               },
@@ -682,7 +974,7 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
             conversationId: group.id,
             conversationType: "group",
             title: group.name,
-            subtitle: group.note || `${memberIdentities.length} 位成员`,
+            subtitle: group.note || `${memberIdentities.length} members`,
             avatarLabel: group.avatarLabel,
             color: group.color,
             group,
@@ -1097,11 +1389,15 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
         record.sourceConversation?.label ??
         (sourceType === "manual" ? t("recordDetail.quickNoteSource") : "");
       const excerpt = record.text_content.trim();
+      const sourceExcerpt =
+        isLocalTestConversationRecord(record) && record.sender === "identity" && sourceLabel
+          ? `${sourceLabel}: ${excerpt}`
+          : excerpt;
       const sourceRef: ArrangementSourceRef = {
         id: `record-source-${record.uid}`,
         type: sourceType,
         title: sourceLabel || t("recordDetail.quickNoteSource"),
-        excerpt,
+        excerpt: sourceExcerpt,
         createdAt: record.send_at,
         ...(record.sourceConversation?.conversationId
           ? { conversationId: record.sourceConversation.conversationId }
@@ -1111,23 +1407,352 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
 
       return {
         title: excerpt.slice(0, 40) || t("recordDetail.untitled"),
-        note: sourceLabel ? `来自：${sourceLabel}` : undefined,
+        note:
+          formatArrangementCandidateNote(
+            {
+              sourceLabel,
+              arrangementText: excerpt,
+            },
+            resolvedLocale
+          ) || undefined,
+        semanticKey:
+          record.sourceConversation?.conversationId
+            ? `${record.sourceConversation.conversationId}:${record.uid}`
+            : record.uid,
         sourceType,
         sourceRef,
       };
     },
-    [getArrangementSourceTypeFromRecord, t]
+    [getArrangementSourceTypeFromRecord, resolvedLocale, t]
+  );
+
+  const deriveLocalArrangementCandidateDraft = React.useCallback(
+    (record: RecordItem, contextRecords: RecordItem[]): ArrangementSourceDraft => {
+      const semanticResult = getLocalArrangementSemanticResult(record, contextRecords);
+      const draft = createArrangementSourceDraftFromRecord(semanticResult.baseRecord);
+      const modifierText = semanticResult.modifierRecord?.text_content.trim();
+      const confirmationText = semanticResult.confirmationRecord?.text_content.trim();
+
+      return {
+        ...draft,
+        semanticKey:
+          semanticResult.baseRecord.sourceConversation?.conversationId
+            ? `${semanticResult.baseRecord.sourceConversation.conversationId}:${semanticResult.baseRecord.uid}`
+            : semanticResult.baseRecord.uid,
+        ...(semanticResult.timeDraft ? { timeDraft: semanticResult.timeDraft } : {}),
+        note:
+          formatArrangementCandidateNote(
+            {
+              sourceLabel: draft.sourceRef.title,
+              arrangementText: draft.title,
+              timeDraft: semanticResult.timeDraft,
+              modifierText,
+              confirmationText,
+            },
+            resolvedLocale
+          ) || undefined,
+      };
+    },
+    [createArrangementSourceDraftFromRecord, resolvedLocale]
   );
 
   const createArrangementCandidateFromRecord = React.useCallback(
     (record: RecordItem) => {
       saveArrangementCandidateFromSourceDraft(
-        createArrangementSourceDraftFromRecord(record)
+        deriveLocalArrangementCandidateDraft(record, mineStatisticRecords)
       );
       setRecordSnapshot(null);
     },
-    [createArrangementSourceDraftFromRecord]
+    [deriveLocalArrangementCandidateDraft, mineStatisticRecords]
   );
+
+  const appendArrangementAiDiagnostic = React.useCallback(
+    (
+      action: AiRecognitionDiagnosticAction,
+      stage: AiRecognitionDiagnosticStage,
+      localDraft: ArrangementSourceDraft,
+      extra: Partial<Parameters<typeof appendAiRecognitionDiagnostic>[0]> = {}
+    ) => {
+      const snapshot = getAiRecognitionConnectionSnapshot(aiApiSettings);
+      appendAiRecognitionDiagnostic({
+        action,
+        stage,
+        ...snapshot,
+        sourceTitle: localDraft.sourceRef.title,
+        sourceExcerpt: localDraft.sourceRef.excerpt,
+        semanticKey: localDraft.semanticKey,
+        conversationId: localDraft.sourceRef.conversationId,
+        recordUid: localDraft.sourceRef.messageId,
+        ...extra,
+      });
+    },
+    [aiApiSettings]
+  );
+
+  const getAiErrorDiagnostic = React.useCallback((error: unknown) => {
+    if (error instanceof AiRecognitionError) {
+      return {
+        stage:
+          error.code === "network"
+            ? "network-error"
+            : error.code === "http"
+              ? "http-error"
+              : error.code === "unconfigured"
+                ? "unconfigured"
+                : "parse-error",
+        httpStatus: error.status,
+        endpoint: error.endpoint,
+        targetEndpoint: error.targetEndpoint,
+        errorName: error.name,
+        errorMessage: error.message,
+        responseBodySnippet: error.bodySnippet,
+      } as const;
+    }
+
+    return {
+      stage: "parse-error" as const,
+      errorName: error instanceof Error ? error.name : "UnknownError",
+      errorMessage: error instanceof Error ? error.message : "AI 识别失败",
+    };
+  }, []);
+
+  const recognizeArrangementCandidateFromRecord = React.useCallback(
+    async (record: RecordItem) => {
+      const localDraft = deriveLocalArrangementCandidateDraft(record, mineStatisticRecords);
+      if (!isAiApiConfigured(aiApiSettings)) {
+        const fallbackCandidate = saveArrangementCandidateFromSourceDraft(localDraft);
+        appendArrangementAiDiagnostic("single", "unconfigured", localDraft, {
+          candidateId: fallbackCandidate.id,
+          fallbackUsed: true,
+          errorMessage: "AI 未启用或 API 配置不完整，已使用本地规则",
+        });
+        setArrangementAiStatus({
+          recordUid: record.uid,
+          state: "success",
+          message: "AI 已关闭，已使用本地规则整理候选",
+        });
+        return;
+      }
+
+      setArrangementAiStatus({
+        recordUid: record.uid,
+        state: "loading",
+        message: "AI 正在识别安排",
+      });
+      const startedAt = performance.now();
+      appendArrangementAiDiagnostic("single", "request", localDraft);
+
+      try {
+        const result = await recognizeArrangementCandidate(localDraft, {
+          locale: resolvedLocale,
+          languageName: getArrangementNoteLanguageName(resolvedLocale),
+        });
+        if (!result.hasArrangement) {
+          appendArrangementAiDiagnostic("single", "empty", localDraft, {
+            durationMs: Math.round(performance.now() - startedAt),
+            errorMessage: result.reason || "AI 没有发现明确安排",
+          });
+          setArrangementAiStatus({
+            recordUid: record.uid,
+            state: "empty",
+            message: result.reason || "AI 没有发现明确安排",
+          });
+          return;
+        }
+
+        const savedCandidate = saveArrangementCandidateFromAiDraft(
+          {
+            title: result.title,
+            note: sanitizeArrangementCandidateNote(result.note, resolvedLocale),
+            timeDraft: result.timeDraft ?? localDraft.timeDraft,
+            location: result.location,
+            people: result.people,
+            confidence: result.confidence,
+            reason: result.reason,
+          },
+          localDraft
+        );
+        appendArrangementAiDiagnostic("single", "success", localDraft, {
+          durationMs: Math.round(performance.now() - startedAt),
+          resultTitle: result.title,
+          candidateId: savedCandidate.id,
+        });
+        setArrangementAiStatus({
+          recordUid: record.uid,
+          state: "success",
+          message: "已添加到可能安排",
+        });
+      } catch (error) {
+        const fallbackCandidate = saveArrangementCandidateFromSourceDraft(localDraft);
+        const diagnostic = getAiErrorDiagnostic(error);
+        appendArrangementAiDiagnostic("single", diagnostic.stage, localDraft, {
+          durationMs: Math.round(performance.now() - startedAt),
+          httpStatus: diagnostic.httpStatus,
+          endpoint: diagnostic.endpoint,
+          targetEndpoint: diagnostic.targetEndpoint,
+          errorName: diagnostic.errorName,
+          errorMessage: diagnostic.errorMessage,
+          responseBodySnippet: diagnostic.responseBodySnippet,
+          candidateId: fallbackCandidate.id,
+          fallbackUsed: true,
+        });
+        setArrangementAiStatus({
+          recordUid: record.uid,
+          state: "success",
+          message:
+            error instanceof Error
+              ? `${error.message}；已改用本地规则`
+              : "AI 识别失败，已改用本地规则",
+        });
+      }
+    },
+    [
+      aiApiSettings,
+      appendArrangementAiDiagnostic,
+      deriveLocalArrangementCandidateDraft,
+      getAiErrorDiagnostic,
+      mineStatisticRecords,
+      resolvedLocale,
+    ]
+  );
+
+  const scanRecentConversationsForArrangements = React.useCallback(async () => {
+    const settings = aiApiSettings;
+    const cutoffTime = Date.now() - recentArrangementScanWindowMs;
+    const recordsToScan = [...selfRecords, ...testConversationRecords]
+      .filter((record) => record.send_at >= cutoffTime)
+      .sort((a, b) => b.send_at - a.send_at)
+      .slice(0, recentArrangementScanLimit);
+
+    if (recordsToScan.length === 0) {
+      setRecentArrangementScanState({
+        state: "empty",
+        message: t("aiSettings.scan.empty"),
+      });
+      return;
+    }
+
+    setRecentArrangementScanState({
+      state: "scanning",
+      message: t("aiSettings.scan.scanning", { count: recordsToScan.length }),
+    });
+
+    const savedCandidateIds = new Set<string>();
+    let aiSuccessCount = 0;
+    let aiFailureCount = 0;
+    let localFallbackCount = 0;
+    try {
+      for (const record of recordsToScan) {
+        const localDraft = deriveLocalArrangementCandidateDraft(record, recordsToScan);
+        const shouldSaveLocal =
+          Boolean(localDraft.timeDraft) ||
+          localDraft.sourceRef.id !== `record-source-${record.uid}` ||
+          !isLocalShortConfirmationText(record.text_content);
+
+        if (!isAiApiConfigured(settings)) {
+          if (!shouldSaveLocal) continue;
+          const savedCandidate = saveArrangementCandidateFromSourceDraft(localDraft);
+          savedCandidateIds.add(savedCandidate.id);
+          localFallbackCount += 1;
+          appendArrangementAiDiagnostic("quick-scan", "unconfigured", localDraft, {
+            candidateId: savedCandidate.id,
+            fallbackUsed: true,
+            errorMessage: t("aiSettings.scan.unconfigured"),
+          });
+          continue;
+        }
+
+        const startedAt = performance.now();
+        appendArrangementAiDiagnostic("quick-scan", "request", localDraft);
+        try {
+          const result = await recognizeArrangementCandidate(localDraft, {
+            locale: resolvedLocale,
+            languageName: getArrangementNoteLanguageName(resolvedLocale),
+          });
+          if (!result.hasArrangement) {
+            appendArrangementAiDiagnostic("quick-scan", "empty", localDraft, {
+              durationMs: Math.round(performance.now() - startedAt),
+              errorMessage: result.reason || "AI 没有发现明确安排",
+            });
+            continue;
+          }
+
+          const savedCandidate = saveArrangementCandidateFromAiDraft(
+            {
+              title: result.title,
+              note: sanitizeArrangementCandidateNote(result.note, resolvedLocale),
+              timeDraft: result.timeDraft ?? localDraft.timeDraft,
+              location: result.location,
+              people: result.people,
+              confidence: result.confidence,
+              reason: result.reason,
+            },
+            localDraft
+          );
+          savedCandidateIds.add(savedCandidate.id);
+          aiSuccessCount += 1;
+          appendArrangementAiDiagnostic("quick-scan", "success", localDraft, {
+            durationMs: Math.round(performance.now() - startedAt),
+            resultTitle: result.title,
+            candidateId: savedCandidate.id,
+          });
+        } catch (error) {
+          aiFailureCount += 1;
+          if (!shouldSaveLocal) continue;
+          const savedCandidate = saveArrangementCandidateFromSourceDraft(localDraft);
+          savedCandidateIds.add(savedCandidate.id);
+          localFallbackCount += 1;
+          const diagnostic = getAiErrorDiagnostic(error);
+          appendArrangementAiDiagnostic("quick-scan", diagnostic.stage, localDraft, {
+            durationMs: Math.round(performance.now() - startedAt),
+            httpStatus: diagnostic.httpStatus,
+            endpoint: diagnostic.endpoint,
+            targetEndpoint: diagnostic.targetEndpoint,
+            errorName: diagnostic.errorName,
+            errorMessage: diagnostic.errorMessage,
+            responseBodySnippet: diagnostic.responseBodySnippet,
+            candidateId: savedCandidate.id,
+            fallbackUsed: true,
+          });
+        }
+      }
+
+      const diagnosticSummary = t("aiSettings.scan.summary", {
+        ai: aiSuccessCount,
+        failed: aiFailureCount,
+        fallback: localFallbackCount,
+      });
+      setRecentArrangementScanState({
+        state: savedCandidateIds.size > 0 ? "success" : "empty",
+        message:
+          savedCandidateIds.size > 0
+            ? t("aiSettings.scan.success", {
+                count: savedCandidateIds.size,
+                summary: diagnosticSummary,
+              })
+            : t("aiSettings.scan.noResult", { summary: diagnosticSummary }),
+      });
+    } catch (error) {
+      setRecentArrangementScanState({
+        state: "error",
+        message: error instanceof Error ? error.message : t("aiSettings.scan.failed"),
+      });
+    }
+  }, [
+    aiApiSettings,
+    appendArrangementAiDiagnostic,
+    deriveLocalArrangementCandidateDraft,
+    getAiErrorDiagnostic,
+    resolvedLocale,
+    selfRecords,
+    t,
+    testConversationRecords,
+  ]);
+  const openAiApiSettings = React.useCallback(() => {
+    setRecordSnapshot(null);
+    setRecordDetail(null);
+    setSettingsView("ai");
+  }, []);
 
   const openArrangementCandidateSource = React.useCallback(
     (sourceRef: ArrangementSourceRef) => {
@@ -1155,12 +1780,26 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
           onCreateExtension={createRecordExtension}
           onOpenSource={openSourceConversation}
           onCreateArrangementCandidate={createArrangementCandidateFromRecord}
+          onRecognizeArrangementCandidate={recognizeArrangementCandidateFromRecord}
+          arrangementAiState={getArrangementAiStateForRecord(recordDetail)}
+          arrangementAiMessage={getArrangementAiMessageForRecord(recordDetail)}
+          onOpenAiSettings={openAiApiSettings}
         />
       );
     }
 
     if (settingsView === "appearance") {
       return <AppearanceStyleScreen onBack={() => setSettingsView("settings")} />;
+    }
+
+    if (settingsView === "ai") {
+      return (
+        <AiApiSettingsScreen
+          onBack={() => setSettingsView("settings")}
+          onScanRecentConversations={scanRecentConversationsForArrangements}
+          scanState={recentArrangementScanState}
+        />
+      );
     }
 
     if (settingsView === "about") {
@@ -1172,6 +1811,7 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
         <SettingsScreen
           onBack={() => setSettingsView(null)}
           onOpenAppearance={() => setSettingsView("appearance")}
+          onOpenAi={() => setSettingsView("ai")}
         />
       );
     }
@@ -1316,6 +1956,10 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
             onClose={() => setRecordSnapshot(null)}
             onOpenSource={openSourceConversation}
             onCreateArrangementCandidate={createArrangementCandidateFromRecord}
+            onRecognizeArrangementCandidate={recognizeArrangementCandidateFromRecord}
+            arrangementAiState={getArrangementAiStateForRecord(recordSnapshot)}
+            arrangementAiMessage={getArrangementAiMessageForRecord(recordSnapshot)}
+            onOpenAiSettings={openAiApiSettings}
           />
         </div>
       }
@@ -1697,17 +2341,17 @@ function recordMatchesQuickType(record: RecordItem, type: QuickSearchType) {
 
   switch (type) {
     case "image":
-      return /图片|照片|视频|image|photo|video/.test(combined);
+      return /图片|照片|相册|截图|视频|image|photo|video/.test(combined);
     case "audio":
       return /语音|音频|录音|voice|audio|recording/.test(combined);
     case "link":
-      return /链接|http|link|url/.test(combined);
+      return /链接|网址|网页|http|link|url/.test(combined);
     case "file":
-      return /文件|文档|file|document/.test(combined);
+      return /文件|文档|资料|file|document/.test(combined);
     case "longArticle":
       return Array.from(record.text_content).length >= 80;
     case "contact":
-      return /联系人|同事|候选人|用户|ai|contact|user/.test(combined);
+      return /联系人|名片|电话|微信|邮箱|contact|user/.test(combined);
     default:
       return true;
   }
@@ -1814,7 +2458,7 @@ function HomeNewMessagePreview({
       type="button"
       className="flex w-full items-center rounded-[16px] border border-border-light bg-surface px-3 py-2.5 text-left shadow-[0_8px_24px_rgba(15,23,42,0.08)] transition hover:bg-[var(--record-card-hover-bg)] active:scale-[0.99] dark:shadow-[0_10px_28px_rgba(0,0,0,0.28)]"
       onClick={onOpen}
-      aria-label={`${t("homeMessagePreview.label")}，${preview.summary.title}`}
+      aria-label={`${t("homeMessagePreview.label")}: ${preview.summary.title}`}
     >
       <AvatarUnreadWrap unreadCount={preview.unreadCount}>
         <TestConversationAvatar summary={preview.summary} className="h-[34px] w-[34px]" />
@@ -2156,7 +2800,7 @@ function TestConversationDrawerItem({
         <p className="mt-0.5 truncate text-xs leading-4 text-text-muted">
           {summary.conversationType === "group" &&
           summary.latestMessage.sender === "identity"
-            ? `${summary.memberIdentities.find((identity) => identity.id === summary.latestMessage.identityId)?.name ?? "成员"}：${summary.latestMessage.text}`
+            ? `${summary.memberIdentities.find((identity) => identity.id === summary.latestMessage.identityId)?.name ?? "Member"}: ${summary.latestMessage.text}`
             : summary.latestMessage.text}
         </p>
       </div>
@@ -2560,7 +3204,7 @@ function TestIdentityConversationChat({
                         <p className="mb-1 px-1 text-[11px] leading-4 text-text-tertiary">
                           {summary.memberIdentities.find(
                             (identity) => identity.id === record.identityId
-                          )?.name ?? "群成员"}
+                          )?.name ?? "Member"}
                         </p>
                       )}
                       <button
@@ -3018,12 +3662,12 @@ function AboutScreen({ onBack }: { onBack: () => void }) {
     },
   ];
   const footerRecords = [
-    "ICP备案号：鄂ICP备2024037215号",
-    "增值电信业务经营许可证：鄂B2-20240478",
-    "模型名称：DeepSeek-R1",
-    "互联网信息服务算法备案号：网信算备330110507206401230035号",
-    "软著：软著登字第14519261号",
-    "森奇思(武汉)科技有限公司",
+    "ICP 2024037215",
+    "App version 20240478",
+    "Model: DeepSeek-R1",
+    "Service record 30110507206401230035",
+    "Public security record 4519261",
+    "Arkme Demo",
   ];
 
   return (
@@ -3171,12 +3815,15 @@ function MineActionCard({
 function SettingsScreen({
   onBack,
   onOpenAppearance,
+  onOpenAi,
 }: {
   onBack: () => void;
   onOpenAppearance: () => void;
+  onOpenAi: () => void;
 }) {
   const { localeCode, resolvedLocale, t } = usePreferences();
   const [showLanguageSheet, setShowLanguageSheet] = React.useState(false);
+  const aiApiSettings = useAiApiSettings();
 
   return (
     <div className="relative flex h-full flex-col bg-bg">
@@ -3190,8 +3837,19 @@ function SettingsScreen({
             onClick={onOpenAppearance}
           />
           <SettingsListItem
+            title={t("aiSettings.title")}
+            description={
+              !aiApiSettings.enabled
+                ? t("aiSettings.mode.localRules")
+                : isAiApiConfigured(aiApiSettings)
+                  ? `${t("aiSettings.mode.enabled")}: ${aiApiSettings.model}`
+                  : t("aiSettings.mode.incomplete")
+            }
+            onClick={onOpenAi}
+          />
+          <SettingsListItem
             title={t("settings.language")}
-            description={`${t("settings.current")}：${
+            description={`${t("settings.current")}: ${
               localeCode === ""
                 ? t("settings.followSystem")
                 : getLocaleDisplayName(localeCode, resolvedLocale)
@@ -3205,6 +3863,366 @@ function SettingsScreen({
         <LanguageSheet onClose={() => setShowLanguageSheet(false)} />
       )}
     </div>
+  );
+}
+
+function AiApiSettingsScreen({
+  onBack,
+  onScanRecentConversations,
+  scanState,
+}: {
+  onBack: () => void;
+  onScanRecentConversations: () => void;
+  scanState: RecentArrangementScanState;
+}) {
+  const { t } = usePreferences();
+  const storedSettings = useAiApiSettings();
+  const diagnostics = useAiRecognitionDiagnostics();
+  const [form, setForm] = React.useState<AiApiSettings>(storedSettings);
+  const [savedMessage, setSavedMessage] = React.useState("");
+  const isScanning = scanState.state === "scanning";
+  const configured = isAiApiConfigured(form);
+  const enabledLabel = !form.enabled
+    ? t("aiSettings.mode.localRules")
+    : configured
+      ? t("aiSettings.mode.enabled")
+      : t("aiSettings.mode.incomplete");
+
+  React.useEffect(() => {
+    setForm(storedSettings);
+  }, [storedSettings]);
+
+  const updateField = <Key extends keyof AiApiSettings>(
+    key: Key,
+    value: AiApiSettings[Key]
+  ) => {
+    setSavedMessage("");
+    setForm((current) => ({ ...current, [key]: value }));
+  };
+
+  const handleSave = () => {
+    persistAiApiSettings(form);
+    setSavedMessage(t("aiSettings.saved"));
+  };
+
+  const handleReset = () => {
+    setForm(defaultAiApiSettings);
+    persistAiApiSettings(defaultAiApiSettings);
+    setSavedMessage(t("aiSettings.resetDone"));
+  };
+
+  return (
+    <div className="flex h-full flex-col bg-bg">
+      <MobilePageHeader title={t("aiSettings.title")} onBack={onBack} />
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-5 pt-3">
+        <section className="rounded-[12px] bg-surface px-3 py-3">
+          <div className="grid grid-cols-[1fr_auto] items-center gap-3">
+            <div className="min-w-0">
+              <div className="flex min-w-0 items-center gap-2">
+                <h2 className="truncate text-[15px] font-semibold leading-5 text-text">
+                  {t("aiSettings.enableTitle")}
+                </h2>
+                <MetaPill
+                  label={enabledLabel}
+                  tone={configured ? "primary" : "muted"}
+                  className="shrink-0"
+                />
+              </div>
+              <p className="mt-1 text-xs leading-5 text-text-tertiary">
+                {t("aiSettings.enableDesc")}
+              </p>
+            </div>
+            <AiRecognitionSwitch
+              checked={form.enabled}
+              ariaLabel={t("aiSettings.switchAria")}
+              onChange={(checked) => updateField("enabled", checked)}
+            />
+          </div>
+        </section>
+
+        <section className="mt-3 space-y-3 rounded-[12px] bg-surface px-3 pb-3 pt-3">
+          <AiSettingsTextField
+            label={t("aiSettings.baseUrl")}
+            value={form.baseUrl}
+            placeholder="https://api.openai.com/v1"
+            onChange={(value) => updateField("baseUrl", value)}
+          />
+          <AiSettingsTextField
+            label={t("aiSettings.apiKey")}
+            value={form.apiKey}
+            placeholder="sk-..."
+            type="password"
+            onChange={(value) => updateField("apiKey", value)}
+          />
+          <AiSettingsTextField
+            label={t("aiSettings.model")}
+            value={form.model}
+            placeholder="gpt-4.1-mini"
+            onChange={(value) => updateField("model", value)}
+          />
+          <div className="border-t border-border-light pt-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[13px] font-medium leading-5 text-text">
+                  {t("aiSettings.quickScanTitle")}
+                </p>
+                <p className="mt-0.5 text-xs leading-5 text-text-tertiary">
+                  {t("aiSettings.quickScanDesc")}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onScanRecentConversations}
+                disabled={isScanning}
+                className="h-8 shrink-0 rounded-[9px] bg-primary-soft px-3 text-[12px] font-medium text-primary transition active:scale-[0.98] disabled:opacity-45"
+              >
+                {isScanning ? t("aiSettings.scanning") : t("aiSettings.quickScan")}
+              </button>
+            </div>
+            {scanState.message && (
+              <p
+                className={cn(
+                  "mt-2 rounded-[9px] px-3 py-2 text-xs leading-5",
+                  scanState.state === "error"
+                    ? "bg-[rgba(255,77,79,0.10)] text-danger"
+                    : "bg-bg text-text-tertiary"
+                )}
+              >
+                {scanState.message}
+              </p>
+            )}
+          </div>
+        </section>
+
+        <p className="mt-3 rounded-[10px] bg-primary-soft px-3 py-2 text-xs leading-5 text-primary">
+          {t("aiSettings.localKeyTip")}
+        </p>
+
+        <AiRecognitionDiagnosticsPanel entries={diagnostics} />
+
+        {savedMessage && (
+          <p className="mt-3 rounded-[10px] bg-surface px-3 py-2 text-xs leading-5 text-text-muted">
+            {savedMessage}
+          </p>
+        )}
+
+        <div className="mt-4 grid grid-cols-[1fr_auto] gap-2">
+          <button
+            type="button"
+            onClick={handleSave}
+            className="h-11 rounded-[12px] bg-primary text-[14px] font-medium text-on-primary transition active:scale-[0.98]"
+          >
+            {t("aiSettings.save")}
+          </button>
+          <button
+            type="button"
+            onClick={handleReset}
+            className="h-11 rounded-[12px] border border-border-light bg-surface px-4 text-[14px] font-medium text-text-muted transition hover:bg-hover-overlay active:scale-[0.98]"
+          >
+            {t("aiSettings.reset")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AiRecognitionSwitch({
+  checked,
+  ariaLabel,
+  onChange,
+}: {
+  checked: boolean;
+  ariaLabel: string;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      className={cn(
+        "relative h-[32px] w-[56px] shrink-0 rounded-full transition-[background-color,box-shadow,transform] duration-200 ease-out active:scale-[0.96]",
+        checked
+          ? "bg-primary shadow-[0_6px_16px_rgba(32,132,95,0.25)]"
+          : "bg-fill-2 shadow-inner"
+      )}
+      aria-pressed={checked}
+      aria-label={ariaLabel}
+    >
+      <span
+        className={cn(
+          "absolute left-[4px] top-1/2 block h-[24px] w-[24px] -translate-y-1/2 rounded-full bg-white shadow-[0_2px_8px_rgba(15,23,42,0.18)] transition-transform duration-200 ease-out",
+          checked ? "translate-x-[24px]" : "translate-x-0"
+        )}
+      />
+    </button>
+  );
+}
+
+function AiRecognitionDiagnosticsPanel({
+  entries,
+}: {
+  entries: ReturnType<typeof useAiRecognitionDiagnostics>;
+}) {
+  const { resolvedLocale, t } = usePreferences();
+  const latestEntries = entries.slice(0, 5);
+
+  return (
+    <section className="mt-3 rounded-[12px] bg-surface px-3 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-[15px] font-semibold leading-5 text-text">
+            {t("aiSettings.diagnostics.title")}
+          </h2>
+          <p className="mt-1 text-xs leading-5 text-text-tertiary">
+            {t("aiSettings.diagnostics.desc")}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={clearAiRecognitionDiagnostics}
+          disabled={entries.length === 0}
+          className="h-8 shrink-0 rounded-[9px] bg-fill-3 px-3 text-[12px] font-medium text-text-tertiary transition active:scale-[0.98] disabled:opacity-40"
+        >
+          {t("aiSettings.diagnostics.clear")}
+        </button>
+      </div>
+
+      {latestEntries.length === 0 ? (
+        <p className="mt-3 rounded-[9px] bg-bg px-3 py-2 text-xs leading-5 text-text-tertiary">
+          {t("aiSettings.diagnostics.empty")}
+        </p>
+      ) : (
+        <div className="mt-3 space-y-2">
+          {latestEntries.map((entry) => (
+            <div key={entry.id} className="rounded-[10px] bg-bg px-3 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <MetaPill
+                  label={getAiDiagnosticStageLabel(entry.stage, t)}
+                  tone={
+                    entry.stage === "success"
+                      ? "primary"
+                      : entry.stage.endsWith("error")
+                        ? "danger"
+                        : "muted"
+                  }
+                  className="shrink-0"
+                />
+                <span className="text-[10px] leading-4 text-text-tertiary">
+                  {formatAiDiagnosticTime(entry.timestamp, resolvedLocale)}
+                </span>
+              </div>
+              <p className="mt-1 truncate text-xs font-medium leading-5 text-text">
+                {entry.sourceTitle || entry.resultTitle || t("aiSettings.diagnostics.unnamedSource")}
+              </p>
+              <p className="mt-0.5 break-all text-[11px] leading-4 text-text-tertiary">
+                {t("aiSettings.diagnostics.browser", {
+                  endpoint: entry.endpoint || t("aiSettings.diagnostics.noEndpoint"),
+                })}
+              </p>
+              {entry.targetEndpoint && (
+                <p className="mt-0.5 break-all text-[11px] leading-4 text-text-tertiary">
+                  {t("aiSettings.diagnostics.target", { endpoint: entry.targetEndpoint })}
+                </p>
+              )}
+              <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[10px] leading-4 text-text-tertiary">
+                {entry.model && (
+                  <span>{t("aiSettings.diagnostics.model", { model: entry.model })}</span>
+                )}
+                <span>
+                  {t("aiSettings.diagnostics.key", {
+                    key: entry.hasApiKey
+                      ? `***${entry.apiKeyTail ?? ""}`
+                      : t("aiSettings.diagnostics.keyMissing"),
+                  })}
+                </span>
+                {typeof entry.httpStatus === "number" && (
+                  <span>
+                    {t("aiSettings.diagnostics.status", { status: entry.httpStatus })}
+                  </span>
+                )}
+                {typeof entry.durationMs === "number" && (
+                  <span>
+                    {t("aiSettings.diagnostics.duration", { duration: entry.durationMs })}
+                  </span>
+                )}
+                {entry.fallbackUsed && <span>{t("aiSettings.diagnostics.fallbackUsed")}</span>}
+              </div>
+              {(entry.errorMessage || entry.responseBodySnippet) && (
+                <p className="mt-1 break-words text-[11px] leading-4 text-danger">
+                  {entry.errorMessage}
+                  {entry.responseBodySnippet ? `：${entry.responseBodySnippet}` : ""}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function getAiDiagnosticStageLabel(
+  stage: AiRecognitionDiagnosticStage,
+  t: (key: string) => string
+) {
+  switch (stage) {
+    case "configured":
+      return t("aiSettings.diagnostics.stage.configured");
+    case "request":
+      return t("aiSettings.diagnostics.stage.request");
+    case "success":
+      return t("aiSettings.diagnostics.stage.success");
+    case "empty":
+      return t("aiSettings.diagnostics.stage.empty");
+    case "http-error":
+      return t("aiSettings.diagnostics.stage.httpError");
+    case "network-error":
+      return t("aiSettings.diagnostics.stage.networkError");
+    case "parse-error":
+      return t("aiSettings.diagnostics.stage.parseError");
+    case "unconfigured":
+      return t("aiSettings.diagnostics.stage.unconfigured");
+    case "fallback":
+      return t("aiSettings.diagnostics.stage.fallback");
+    default:
+      return t("aiSettings.diagnostics.stage.default");
+  }
+}
+
+function formatAiDiagnosticTime(timestamp: number, locale: string) {
+  return new Date(timestamp).toLocaleTimeString(locale, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function AiSettingsTextField({
+  label,
+  value,
+  placeholder,
+  type = "text",
+  onChange,
+}: {
+  label: string;
+  value: string;
+  placeholder: string;
+  type?: "text" | "password";
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="text-[13px] font-medium leading-5 text-text-muted">{label}</span>
+      <input
+        type={type}
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-2 h-11 w-full rounded-[12px] border border-transparent bg-bg px-3 text-[14px] text-text shadow-soft outline-none placeholder:text-input-placeholder focus:shadow-[0_0_0_1px_var(--primary-ring),0_0_10px_var(--primary-ring)]"
+      />
+    </label>
   );
 }
 

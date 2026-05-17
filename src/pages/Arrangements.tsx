@@ -1,22 +1,25 @@
 import React from "react";
 import EmptyState from "@/components/EmptyState";
+import MetaPill from "@/components/MetaPill";
 import SearchIcon from "@/components/SearchIcon";
 import {
   arrangementCandidatesStorageEvent,
   arrangementsStorageEvent,
   createArrangementFromCandidate,
   createManualArrangement,
-  getArrangementTimeFieldsForPreset,
+  getArrangementTimeFieldsFromDraft,
   getInitialArrangementCandidates,
   getInitialArrangements,
-  getSourceTypeLabel,
   persistArrangements,
   updateArrangementCandidateStatus,
   type ArrangementCandidate,
+  type ArrangementTimeDraft,
+  type ArrangementTimePart,
   type ArrangementTimePreset,
 } from "@/data/arrangements";
 import { formatTimeLabel } from "@/lib/time";
 import { cn } from "@/lib/utils";
+import { usePreferences } from "@/settings/preferences";
 import type {
   ArrangementAiCapability,
   ArrangementItem,
@@ -31,31 +34,31 @@ type EditorMode = "create" | "edit" | "confirm";
 
 type EditorForm = {
   title: string;
-  timePreset: ArrangementTimePreset;
+  timeDraft: ArrangementTimeDraft;
   location: string;
   people: string;
   note: string;
 };
 
-const filters: Array<{ key: ArrangementFilter; label: string }> = [
-  { key: "all", label: "全部" },
-  { key: "near", label: "近期" },
-  { key: "later", label: "以后再说" },
-  { key: "done", label: "已完成" },
+const filters: Array<{ key: ArrangementFilter; labelKey: string }> = [
+  { key: "all", labelKey: "arrangements.filter.all" },
+  { key: "near", labelKey: "arrangements.filter.near" },
+  { key: "later", labelKey: "arrangements.filter.later" },
+  { key: "done", labelKey: "arrangements.filter.done" },
 ];
 
-const sourceFilters: Array<{ key: ArrangementSourceFilter; label: string }> = [
-  { key: "all", label: "全部来源" },
-  { key: "manual", label: "手动" },
-  { key: "sendToSelf", label: "发给自己" },
-  { key: "privateChat", label: "私聊" },
-  { key: "groupChat", label: "群聊" },
-  { key: "aiSuggestion", label: "AI 建议" },
+const sourceFilters: Array<{ key: ArrangementSourceFilter; labelKey: string }> = [
+  { key: "all", labelKey: "arrangements.source.all" },
+  { key: "manual", labelKey: "arrangements.source.manual" },
+  { key: "sendToSelf", labelKey: "arrangements.source.sendToSelf" },
+  { key: "privateChat", labelKey: "arrangements.source.privateChat" },
+  { key: "groupChat", labelKey: "arrangements.source.groupChat" },
+  { key: "aiSuggestion", labelKey: "arrangements.source.aiSuggestion" },
 ];
 
 const emptyEditorForm: EditorForm = {
   title: "",
-  timePreset: "none",
+  timeDraft: { kind: "none" },
   location: "",
   people: "",
   note: "",
@@ -66,6 +69,7 @@ type ArrangementsProps = {
 };
 
 export default function Arrangements({ onOpenCandidateSource }: ArrangementsProps) {
+  const { t } = usePreferences();
   const [arrangements, setArrangements] = React.useState(getInitialArrangements);
   const [candidates, setCandidates] = React.useState(getInitialArrangementCandidates);
   const [activeFilter, setActiveFilter] = React.useState<ArrangementFilter>("all");
@@ -181,13 +185,13 @@ export default function Arrangements({ onOpenCandidateSource }: ArrangementsProp
 
   const handleEditArrangement = (form: EditorForm) => {
     if (!editingArrangement) return;
-    const timeFields = getArrangementTimeFieldsForPreset(form.timePreset);
+    const timeFields = getArrangementTimeFieldsFromDraft(form.timeDraft);
     patchArrangement(editingArrangement.id, {
       title: form.title.trim(),
       note: form.note.trim() || undefined,
       timeKind: timeFields.timeKind,
       startAt: timeFields.startAt,
-      endAt: undefined,
+      endAt: timeFields.endAt,
       fuzzyTimeLabel: timeFields.fuzzyTimeLabel,
       location: form.location.trim() || undefined,
       people: splitPeopleInput(form.people),
@@ -245,9 +249,9 @@ export default function Arrangements({ onOpenCandidateSource }: ArrangementsProp
       <header className="shrink-0 bg-bg px-4 pb-2 pt-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="text-xl font-semibold leading-7 text-text">安排</h1>
+            <h1 className="text-xl font-semibold leading-7 text-text">{t("arrangements.title")}</h1>
             <p className="mt-0.5 text-xs leading-5 text-text-tertiary">
-              未来的事，轻一点放在这
+              {t("arrangements.subtitle")}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -258,7 +262,7 @@ export default function Arrangements({ onOpenCandidateSource }: ArrangementsProp
                 "flex h-9 w-9 items-center justify-center rounded-[8px] text-text-tertiary transition hover:bg-hover-overlay active:scale-[0.96]",
                 (showSearchBar || searchQuery.trim()) && "text-primary"
               )}
-              aria-label="搜索安排"
+              aria-label={t("arrangements.searchLabel")}
             >
               <SearchIcon className="h-6 w-6" />
             </button>
@@ -266,7 +270,7 @@ export default function Arrangements({ onOpenCandidateSource }: ArrangementsProp
               type="button"
               onClick={() => setShowEditor(true)}
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-[24px] font-light leading-none text-on-primary shadow-soft transition active:scale-[0.96]"
-              aria-label="新增安排"
+              aria-label={t("arrangements.action.create")}
             >
               +
             </button>
@@ -274,13 +278,15 @@ export default function Arrangements({ onOpenCandidateSource }: ArrangementsProp
         </div>
         {!showSearchBar && searchQuery.trim() && (
           <div className="mt-2 flex items-center gap-2 text-[12px] leading-5 text-text-tertiary">
-            <span className="min-w-0 flex-1 truncate">搜索：{searchQuery.trim()}</span>
+            <span className="min-w-0 flex-1 truncate">
+              {t("arrangements.searchActive", { keyword: searchQuery.trim() })}
+            </span>
             <button
               type="button"
               onClick={() => setSearchQuery("")}
               className="shrink-0 text-primary"
             >
-              清除
+              {t("arrangements.clear")}
             </button>
           </div>
         )}
@@ -336,7 +342,7 @@ export default function Arrangements({ onOpenCandidateSource }: ArrangementsProp
                       : "text-text-tertiary hover:bg-hover-overlay"
                   )}
                 >
-                  {filter.label}
+                  {t(filter.labelKey)}
                 </button>
               );
             })}
@@ -344,7 +350,7 @@ export default function Arrangements({ onOpenCandidateSource }: ArrangementsProp
         </div>
 
         <ArrangementListSection
-          title={getGroupTitle(activeFilter)}
+          title={t(getGroupTitleKey(activeFilter))}
           arrangements={visibleArrangements}
           sourceFilter={sourceFilter}
           showSourceFilters={showSourceFilters}
@@ -414,16 +420,17 @@ function ArrangementCandidateSection({
   onIgnore: (candidate: ArrangementCandidate) => void;
   onOpenSource?: (sourceRef: ArrangementSourceRef) => void;
 }) {
+  const { t, resolvedLocale } = usePreferences();
   if (candidates.length === 0) return null;
 
   return (
     <section className="mt-3">
       <div className="mb-2 flex items-center justify-between">
         <h2 className="text-[13px] font-semibold leading-5 text-text-muted">
-          可能是安排
+          {t("arrangements.candidate.title")}
         </h2>
         <span className="text-[11px] leading-4 text-text-tertiary">
-          {candidates.length} 条候选
+          {t("arrangements.candidate.count", { count: candidates.length })}
         </span>
       </div>
       <div className="space-y-2">
@@ -433,18 +440,44 @@ function ArrangementCandidateSection({
             className="rounded-[12px] border border-[var(--record-card-border)] bg-surface px-3 py-3 shadow-[var(--mine-card-shadow)]"
           >
             <div className="flex items-start justify-between gap-2">
-              <h3 className="min-w-0 text-[15px] font-semibold leading-5 text-text">
-                {candidate.title}
-              </h3>
-              <StatusPill label={getSourceTypeLabel(candidate.sourceType)} tone="muted" />
+              <div className="min-w-0">
+                <h3 className="text-[15px] font-semibold leading-5 text-text">
+                  {candidate.title}
+                </h3>
+              </div>
+              <div className="flex shrink-0 flex-col items-end gap-1">
+                {candidate.createdBy === "ai" && (
+                  <MetaPill label={t("arrangements.candidate.aiSuggestion")} tone="primary" />
+                )}
+                <MetaPill label={t(getSourceTypeLabelKey(candidate.sourceType))} />
+              </div>
             </div>
             {candidate.note && (
               <p className="mt-1 line-clamp-2 text-[12px] leading-5 text-text-tertiary">
                 {candidate.note}
               </p>
             )}
+            {candidate.createdBy === "ai" && candidate.reason && (
+              <p className="mt-2 line-clamp-2 text-[12px] leading-5 text-text-tertiary">
+                {t("arrangements.candidate.reason", { reason: candidate.reason })}
+              </p>
+            )}
+            {candidate.createdBy === "ai" && typeof candidate.confidence === "number" && (
+              <p className="mt-1 text-[11px] leading-4 text-text-tertiary">
+                {t("arrangements.candidate.confidence", {
+                  percent: Math.round(candidate.confidence * 100),
+                })}
+              </p>
+            )}
+            {(candidate.location || (candidate.people && candidate.people.length > 0)) && (
+              <p className="mt-1 text-[11px] leading-4 text-text-tertiary">
+                {[candidate.location, candidate.people?.join(getListSeparator(resolvedLocale))]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+            )}
             <p className="mt-2 line-clamp-2 text-[13px] leading-5 text-text-muted">
-              {candidate.sourceRef.excerpt}
+              {t("arrangements.candidate.source", { excerpt: candidate.sourceRef.excerpt })}
             </p>
             <div className="mt-3 grid grid-cols-3 gap-2">
               <button
@@ -452,14 +485,14 @@ function ArrangementCandidateSection({
                 onClick={() => onConfirm(candidate)}
                 className="h-9 rounded-[11px] bg-primary text-[13px] font-medium text-on-primary transition active:scale-[0.98]"
               >
-                确认
+                {t("arrangements.candidate.confirm")}
               </button>
               <button
                 type="button"
                 onClick={() => onIgnore(candidate)}
                 className="h-9 rounded-[11px] border border-border-light bg-surface text-[13px] font-medium text-text-muted transition hover:bg-hover-overlay active:scale-[0.98]"
               >
-                忽略
+                {t("arrangements.candidate.ignore")}
               </button>
               <button
                 type="button"
@@ -467,7 +500,7 @@ function ArrangementCandidateSection({
                 className="h-9 rounded-[11px] border border-border-light bg-surface text-[13px] font-medium text-text-muted transition hover:bg-hover-overlay active:scale-[0.98] disabled:opacity-45"
                 disabled={!onOpenSource}
               >
-                查看来源
+                {t("arrangements.candidate.openSource")}
               </button>
             </div>
           </article>
@@ -500,15 +533,17 @@ function TodaySpotlightSection({
   onShowDone: () => void;
   onCreate: () => void;
 }) {
+  const { t } = usePreferences();
+
   if (arrangements.length > 0) {
     return (
       <section className="pt-1">
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-[13px] font-semibold leading-5 text-text-muted">
-            今天值得留意
+            {t("arrangements.today.title")}
           </h2>
           <span className="text-[11px] leading-4 text-text-tertiary">
-            {arrangements.length} 条
+            {t("arrangements.today.count", { count: arrangements.length })}
           </span>
         </div>
         <div className="space-y-2">
@@ -530,9 +565,9 @@ function TodaySpotlightSection({
   if (allVisibleArrangementsDone) {
     return (
       <SpotlightMessage
-        title="今天都处理好了"
-        description="已完成的安排会留在「已完成」里，之后也可以恢复。"
-        actionLabel="查看已完成"
+        title={t("arrangements.today.doneTitle")}
+        description={t("arrangements.today.doneDesc")}
+        actionLabel={t("arrangements.today.doneAction")}
         onAction={onShowDone}
       />
     );
@@ -541,9 +576,9 @@ function TodaySpotlightSection({
   if (!hasAnyVisibleArrangement) {
     return (
       <SpotlightMessage
-        title="还没有安排"
-        description="把接下来可能要做的事先放进来，不确定时间也没关系。"
-        actionLabel="新增安排"
+        title={t("arrangements.today.emptyTitle")}
+        description={t("arrangements.today.emptyDesc")}
+        actionLabel={t("arrangements.today.emptyAction")}
         onAction={onCreate}
       />
     );
@@ -552,9 +587,9 @@ function TodaySpotlightSection({
   if (hasFutureActiveArrangements) {
     return (
       <SpotlightMessage
-        title="今天不用急"
-        description="后面还有几条安排，可以先看看近期。"
-        actionLabel="查看近期"
+        title={t("arrangements.today.calmTitle")}
+        description={t("arrangements.today.futureDesc")}
+        actionLabel={t("arrangements.today.futureAction")}
         onAction={onShowNear}
       />
     );
@@ -562,8 +597,8 @@ function TodaySpotlightSection({
 
   return (
     <SpotlightMessage
-      title="今天不用急"
-      description="暂时没有需要今天处理的安排。"
+      title={t("arrangements.today.calmTitle")}
+      description={t("arrangements.today.noTodayDesc")}
     />
   );
 }
@@ -579,11 +614,15 @@ function SpotlightMessage({
   actionLabel?: string;
   onAction?: () => void;
 }) {
+  const { t } = usePreferences();
+
   return (
     <section className="pt-1">
       <div className="mb-2 flex items-center justify-between">
         <h2 className="text-[13px] font-semibold leading-5 text-text-muted">{title}</h2>
-        <span className="text-[11px] leading-4 text-text-tertiary">0 条</span>
+        <span className="text-[11px] leading-4 text-text-tertiary">
+          {t("arrangements.today.count", { count: 0 })}
+        </span>
       </div>
       <div className="rounded-[12px] bg-surface px-3 py-4 text-sm leading-5 text-text-tertiary">
         <p>{description}</p>
@@ -612,17 +651,18 @@ function ArrangementSearchPanel({
   onSearchQueryChange: (value: string) => void;
   onCloseSearch: () => void;
 }) {
+  const { t } = usePreferences();
   if (!showSearchBar) return null;
 
   return (
     <div className="pb-3 pt-1">
       <div className="flex items-center gap-2">
         <label className="min-w-0 flex-1">
-          <span className="sr-only">搜索安排</span>
+          <span className="sr-only">{t("arrangements.searchLabel")}</span>
           <input
             value={searchQuery}
             onChange={(event) => onSearchQueryChange(event.target.value)}
-            placeholder="搜索安排、地点、相关人"
+            placeholder={t("arrangements.searchPlaceholder")}
             className="h-10 w-full rounded-[12px] border border-transparent bg-surface px-3 text-[13px] text-text shadow-soft outline-none placeholder:text-input-placeholder focus:shadow-[0_0_0_1px_var(--primary-ring),0_0_10px_var(--primary-ring)]"
             autoFocus
           />
@@ -632,7 +672,7 @@ function ArrangementSearchPanel({
           onClick={onCloseSearch}
           className="h-10 shrink-0 px-2 text-[13px] font-medium text-text-tertiary transition hover:text-text active:scale-[0.98]"
         >
-          取消
+          {t("search.cancel")}
         </button>
       </div>
     </div>
@@ -650,7 +690,8 @@ function ArrangementSourceDropdown({
   onSourceFilterChange: (value: ArrangementSourceFilter) => void;
   onToggleSourceFilters: () => void;
 }) {
-  const currentLabel = getSourceFilterLabel(sourceFilter);
+  const { t } = usePreferences();
+  const currentLabel = t(getSourceFilterLabelKey(sourceFilter));
 
   return (
     <div className="relative shrink-0">
@@ -663,7 +704,7 @@ function ArrangementSourceDropdown({
         )}
         aria-expanded={showSourceFilters}
       >
-        来源：{currentLabel}
+        {t("arrangements.sourcePrefix", { source: currentLabel })}
       </button>
       {showSourceFilters && (
         <div className="absolute right-0 top-full z-20 mt-1 w-[160px] overflow-hidden rounded-[12px] border border-border-light bg-[var(--dialog-bg)] p-1 shadow-[0_10px_28px_rgba(0,0,0,0.14)]">
@@ -681,7 +722,7 @@ function ArrangementSourceDropdown({
                     : "text-text-tertiary hover:bg-hover-overlay hover:text-text"
                 )}
               >
-                {filter.label}
+                {t(filter.labelKey)}
               </button>
             );
           })}
@@ -718,6 +759,8 @@ function ArrangementListSection({
   onClearFilters: () => void;
   onCreate: () => void;
 }) {
+  const { t } = usePreferences();
+
   return (
     <section className="space-y-3">
       <div className="relative mb-2 flex items-center justify-between gap-3">
@@ -747,11 +790,15 @@ function ArrangementListSection({
       ) : (
         <div className="flex min-h-[300px] items-center justify-center">
           <EmptyState
-            title={hasActiveListFilters ? "没有匹配的安排" : "这里还没有安排"}
+            title={
+              hasActiveListFilters
+                ? t("arrangements.empty.noMatches")
+                : t("arrangements.empty.noItems")
+            }
             description={
               hasActiveListFilters
-                ? "换个关键词或来源试试。"
-                : "把接下来可能要做的事先放进来，不确定时间也没关系。"
+                ? t("arrangements.empty.noMatchesDesc")
+                : t("arrangements.empty.noItemsDesc")
             }
             action={
               hasActiveListFilters ? (
@@ -760,7 +807,7 @@ function ArrangementListSection({
                   onClick={onClearFilters}
                   className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-on-primary transition active:scale-[0.98]"
                 >
-                  清除筛选
+                  {t("arrangements.empty.clearFilters")}
                 </button>
               ) : (
                 <button
@@ -768,7 +815,7 @@ function ArrangementListSection({
                   onClick={onCreate}
                   className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-on-primary transition active:scale-[0.98]"
                 >
-                  新增安排
+                  {t("arrangements.action.create")}
                 </button>
               )
             }
@@ -792,6 +839,7 @@ function ArrangementCard({
   onComplete: () => void;
   onRestore: () => void;
 }) {
+  const { t, resolvedLocale } = usePreferences();
   const done = arrangement.status === "done";
   const later = arrangement.status === "later";
 
@@ -819,7 +867,9 @@ function ArrangementCard({
               ? "border-primary bg-primary text-on-primary"
               : "border-border-strong bg-surface text-transparent"
           )}
-          aria-label={done ? "恢复安排" : "完成安排"}
+          aria-label={
+            done ? t("arrangements.action.restoreAria") : t("arrangements.action.completeAria")
+          }
         >
           ✓
         </button>
@@ -833,24 +883,25 @@ function ArrangementCard({
             >
               {arrangement.title}
             </h3>
-            {later && <StatusPill label="以后再说" tone="muted" />}
-            {done && <StatusPill label="已完成" tone="primary" />}
+            {later && <MetaPill label={t("arrangements.status.later")} />}
+            {done && <MetaPill label={t("arrangements.status.done")} tone="primary" />}
           </div>
           <p className="mt-1 text-[12px] leading-5 text-text-tertiary">
-            {formatArrangementMeta(arrangement)}
+            {formatArrangementMeta(arrangement, t, resolvedLocale)}
           </p>
           <div className="mt-2 flex flex-wrap gap-1.5">
-            <StatusPill label={getSourceTypeLabel(arrangement.sourceType)} tone="muted" />
+            <MetaPill label={t(getSourceTypeLabelKey(arrangement.sourceType))} />
             {arrangement.aiCapability !== "userOnly" && (
-              <StatusPill
-                label={getAiCapabilityLabel(arrangement.aiCapability)}
+              <MetaPill
+                label={t(getAiCapabilityLabelKey(arrangement.aiCapability))}
                 tone="primary"
               />
             )}
             {arrangement.sourceRefs.length > 1 && (
-              <StatusPill
-                label={`关联 ${arrangement.sourceRefs.length} 段上下文`}
-                tone="muted"
+              <MetaPill
+                label={t("arrangements.contextCount", {
+                  count: arrangement.sourceRefs.length,
+                })}
               />
             )}
           </div>
@@ -877,6 +928,7 @@ function ArrangementDetailSheet({
   onEdit: (arrangement: ArrangementItem) => void;
   onArchive: (arrangement: ArrangementItem) => void;
 }) {
+  const { t, resolvedLocale } = usePreferences();
   if (!arrangement) return null;
 
   const canRestore = arrangement.status === "later" || arrangement.status === "done";
@@ -889,25 +941,25 @@ function ArrangementDetailSheet({
         type="button"
         className="absolute inset-0 bg-overlay"
         onClick={onClose}
-        aria-label="关闭安排详情"
+        aria-label={t("arrangements.detail.close")}
       />
       <section
         className="relative z-10 flex max-h-[86%] w-full flex-col overflow-hidden rounded-t-[16px] border border-border-light bg-[var(--dialog-bg)] shadow-[0_-12px_36px_rgba(0,0,0,0.18)]"
         role="dialog"
         aria-modal="true"
-        aria-label="安排详情"
+        aria-label={t("arrangements.detail.title")}
       >
         <header className="shrink-0 border-b border-border-light px-4 pb-3 pt-2.5">
           <div className="mx-auto mb-2 h-1 w-9 rounded-full bg-fill-2" />
           <div className="flex items-center gap-3">
             <h2 className="min-w-0 flex-1 truncate text-[14px] leading-5 text-text">
-              安排详情
+              {t("arrangements.detail.title")}
             </h2>
             <button
               type="button"
               onClick={onClose}
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-text-tertiary transition hover:bg-hover-overlay hover:text-text active:scale-[0.96]"
-              aria-label="关闭安排详情"
+              aria-label={t("arrangements.detail.close")}
             >
               <CloseIcon />
             </button>
@@ -925,23 +977,39 @@ function ArrangementDetailSheet({
           )}
 
           <div className="mt-4 space-y-3 rounded-[12px] bg-[var(--record-detail-muted-bg)] px-3 py-3">
-            <DetailRow label="状态" value={getStatusLabel(arrangement.status)} />
-            <DetailRow label="时间" value={formatArrangementTime(arrangement)} />
-            <DetailRow label="地点" value={arrangement.location || "暂未设置"} />
             <DetailRow
-              label="相关人"
-              value={arrangement.people.length > 0 ? arrangement.people.join("、") : "暂无"}
+              label={t("arrangements.detail.status")}
+              value={t(getStatusLabelKey(arrangement.status))}
             />
-            <DetailRow label="来源" value={getSourceTypeLabel(arrangement.sourceType)} />
             <DetailRow
-              label="AI 能力"
-              value={getAiCapabilityLabel(arrangement.aiCapability)}
+              label={t("arrangements.detail.time")}
+              value={formatArrangementTime(arrangement, t, resolvedLocale)}
+            />
+            <DetailRow
+              label={t("arrangements.detail.location")}
+              value={arrangement.location || t("arrangements.detail.noLocation")}
+            />
+            <DetailRow
+              label={t("arrangements.detail.people")}
+              value={
+                arrangement.people.length > 0
+                  ? arrangement.people.join(getListSeparator(resolvedLocale))
+                  : t("arrangements.detail.noPeople")
+              }
+            />
+            <DetailRow
+              label={t("arrangements.detail.source")}
+              value={t(getSourceTypeLabelKey(arrangement.sourceType))}
+            />
+            <DetailRow
+              label={t("arrangements.detail.aiCapability")}
+              value={t(getAiCapabilityLabelKey(arrangement.aiCapability))}
             />
           </div>
 
           <section className="mt-4">
             <h4 className="text-[13px] font-semibold leading-5 text-text-muted">
-              相关上下文
+              {t("arrangements.detail.context")}
             </h4>
             <div className="mt-2 space-y-2">
               {arrangement.sourceRefs.map((sourceRef) => (
@@ -949,9 +1017,12 @@ function ArrangementDetailSheet({
                   key={sourceRef.id}
                   className="rounded-[10px] border border-border-light bg-surface px-3 py-2"
                 >
-                  <p className="text-[12px] font-medium leading-5 text-text-muted">
-                    {sourceRef.title}
-                  </p>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="min-w-0 flex-1 truncate text-[12px] font-medium leading-5 text-text-muted">
+                      {sourceRef.title}
+                    </p>
+                    <MetaPill label={t(getSourceTypeLabelKey(sourceRef.type))} />
+                  </div>
                   <p className="mt-0.5 text-[13px] leading-5 text-text">
                     {sourceRef.excerpt}
                   </p>
@@ -964,16 +1035,30 @@ function ArrangementDetailSheet({
         <footer className="shrink-0 border-t border-border-light bg-[var(--dialog-bg)] px-4 py-3">
           <div className="grid grid-cols-2 gap-2">
             {canComplete && (
-              <ActionButton label="完成" primary onClick={() => onComplete(arrangement)} />
+              <ActionButton
+                label={t("arrangements.action.complete")}
+                primary
+                onClick={() => onComplete(arrangement)}
+              />
             )}
             {canMoveLater && (
-              <ActionButton label="以后再说" onClick={() => onMoveLater(arrangement)} />
+              <ActionButton
+                label={t("arrangements.action.moveLater")}
+                onClick={() => onMoveLater(arrangement)}
+              />
             )}
             {canRestore && (
-              <ActionButton label="重新放回安排" primary onClick={() => onRestore(arrangement)} />
+              <ActionButton
+                label={t("arrangements.action.restore")}
+                primary
+                onClick={() => onRestore(arrangement)}
+              />
             )}
-            <ActionButton label="编辑" onClick={() => onEdit(arrangement)} />
-            <ActionButton label="归档" onClick={() => onArchive(arrangement)} />
+            <ActionButton label={t("arrangements.action.edit")} onClick={() => onEdit(arrangement)} />
+            <ActionButton
+              label={t("arrangements.action.archive")}
+              onClick={() => onArchive(arrangement)}
+            />
           </div>
         </footer>
       </section>
@@ -992,18 +1077,12 @@ function ArrangementEditorSheet({
   onClose: () => void;
   onSubmit: (form: EditorForm) => void;
 }) {
+  const { t } = usePreferences();
   const [form, setForm] = React.useState<EditorForm>(initialValue ?? emptyEditorForm);
   const canSubmit = form.title.trim().length > 0;
-  const title =
-    mode === "edit" ? "编辑安排" : mode === "confirm" ? "确认候选安排" : "新增安排";
-  const submitLabel =
-    mode === "edit" ? "保存修改" : mode === "confirm" ? "保存为安排" : "保存安排";
-  const closeLabel =
-    mode === "edit"
-      ? "关闭编辑安排"
-      : mode === "confirm"
-        ? "关闭确认候选安排"
-        : "关闭新增安排";
+  const title = t(getEditorTitleKey(mode));
+  const submitLabel = t(getEditorSubmitKey(mode));
+  const closeLabel = t(getEditorCloseKey(mode));
 
   const updateField = <Key extends keyof EditorForm>(key: Key, value: EditorForm[Key]) => {
     setForm((current) => ({ ...current, [key]: value }));
@@ -1042,56 +1121,46 @@ function ArrangementEditorSheet({
 
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
           <label className="block">
-            <span className="text-[13px] font-medium leading-5 text-text-muted">内容</span>
+            <span className="text-[13px] font-medium leading-5 text-text-muted">
+              {t("arrangements.editor.content")}
+            </span>
             <textarea
               value={form.title}
               onChange={(event) => updateField("title", event.target.value)}
-              placeholder="写下接下来可能要做的事"
+              placeholder={t("arrangements.editor.contentPlaceholder")}
               className="mt-2 min-h-[88px] w-full resize-none rounded-[12px] border border-transparent bg-surface px-3 py-3 text-[15px] leading-6 text-text shadow-soft outline-none placeholder:text-input-placeholder focus:shadow-[0_0_0_1px_var(--primary-ring),0_0_10px_var(--primary-ring)]"
             />
           </label>
 
           <div>
-            <p className="text-[13px] font-medium leading-5 text-text-muted">时间</p>
-            <div className="mt-2 grid grid-cols-4 gap-1 rounded-[12px] bg-surface p-1">
-              {timePresetOptions.map((option) => {
-                const active = form.timePreset === option.key;
-                return (
-                  <button
-                    key={option.key}
-                    type="button"
-                    onClick={() => updateField("timePreset", option.key)}
-                    className={cn(
-                      "h-8 rounded-[9px] text-[12px] font-medium transition active:scale-[0.98]",
-                      active ? "bg-primary-soft text-primary" : "text-text-tertiary"
-                    )}
-                  >
-                    {option.label}
-                  </button>
-                );
-              })}
-            </div>
+            <p className="text-[13px] font-medium leading-5 text-text-muted">
+              {t("arrangements.editor.time")}
+            </p>
+            <TimeDraftSelector
+              value={form.timeDraft}
+              onChange={(value) => updateField("timeDraft", value)}
+            />
             <p className="mt-1 text-[11px] leading-4 text-text-tertiary">
-              不确定时间也可以先放进来。
+              {t("arrangements.editor.timeHint")}
             </p>
           </div>
 
           <TextField
-            label="地点"
+            label={t("arrangements.editor.location")}
             value={form.location}
-            placeholder="医院、公司、线上..."
+            placeholder={t("arrangements.editor.locationPlaceholder")}
             onChange={(value) => updateField("location", value)}
           />
           <TextField
-            label="相关人"
+            label={t("arrangements.editor.people")}
             value={form.people}
-            placeholder="用空格或顿号分隔"
+            placeholder={t("arrangements.editor.peoplePlaceholder")}
             onChange={(value) => updateField("people", value)}
           />
           <TextField
-            label="备注"
+            label={t("arrangements.editor.note")}
             value={form.note}
-            placeholder="补充背景或想法"
+            placeholder={t("arrangements.editor.notePlaceholder")}
             onChange={(value) => updateField("note", value)}
           />
         </div>
@@ -1114,12 +1183,181 @@ function ArrangementEditorSheet({
   );
 }
 
-const timePresetOptions: Array<{ key: ArrangementTimePreset; label: string }> = [
-  { key: "none", label: "无时间" },
-  { key: "today", label: "今天" },
-  { key: "tomorrow", label: "明天" },
-  { key: "weekend", label: "周末" },
+type TimeQuickOption = {
+  key: string;
+  labelKey: string;
+  draft: ArrangementTimeDraft;
+};
+
+const timeQuickOptions: TimeQuickOption[] = [
+  { key: "none", labelKey: "arrangements.time.none", draft: { kind: "none" } },
+  { key: "today", labelKey: "arrangements.time.today", draft: { kind: "relativeDay", day: "today" } },
+  {
+    key: "tomorrow",
+    labelKey: "arrangements.time.tomorrow",
+    draft: { kind: "relativeDay", day: "tomorrow" },
+  },
+  { key: "weekday", labelKey: "arrangements.time.weekday", draft: { kind: "weekday", weekday: 1 } },
+  { key: "date", labelKey: "arrangements.time.date", draft: { kind: "date", date: getTodayInputValue() } },
 ];
+
+const weekdayOptions: Array<{ key: 1 | 2 | 3 | 4 | 5 | 6 | 0; labelKey: string }> = [
+  { key: 1, labelKey: "arrangements.time.weekday.1" },
+  { key: 2, labelKey: "arrangements.time.weekday.2" },
+  { key: 3, labelKey: "arrangements.time.weekday.3" },
+  { key: 4, labelKey: "arrangements.time.weekday.4" },
+  { key: 5, labelKey: "arrangements.time.weekday.5" },
+  { key: 6, labelKey: "arrangements.time.weekday.6" },
+  { key: 0, labelKey: "arrangements.time.weekday.0" },
+];
+
+const timePartOptions: Array<{
+  key: ArrangementTimePart | undefined;
+  labelKey: string;
+}> = [
+  { key: undefined, labelKey: "arrangements.time.part.any" },
+  { key: "morning", labelKey: "arrangements.time.part.morning" },
+  { key: "afternoon", labelKey: "arrangements.time.part.afternoon" },
+  { key: "evening", labelKey: "arrangements.time.part.evening" },
+];
+
+function TimeDraftSelector({
+  value,
+  onChange,
+}: {
+  value: ArrangementTimeDraft;
+  onChange: (value: ArrangementTimeDraft) => void;
+}) {
+  const { t } = usePreferences();
+  const activeQuickKey = getActiveTimeQuickKey(value);
+  const showClockInput = value.kind !== "none";
+
+  const updatePart = (part: ArrangementTimePart | undefined) => {
+    if (value.kind === "none") return;
+    onChange({ ...value, part, clock: undefined });
+  };
+
+  const updateClock = (clock: string) => {
+    if (value.kind === "none") return;
+    onChange({ ...value, clock });
+  };
+
+  return (
+    <div className="mt-2 space-y-2 rounded-[14px] bg-surface p-2 shadow-soft">
+      <div className="space-y-1.5">
+        <p className="px-1 text-[11px] font-medium leading-4 text-text-tertiary">
+          {t("arrangements.time.pickDate")}
+        </p>
+        <div className="grid grid-cols-3 gap-1">
+          {timeQuickOptions.map((option) => {
+            const active = activeQuickKey === option.key;
+            return (
+              <button
+                key={option.key}
+                type="button"
+                onClick={() => onChange(option.draft)}
+                className={cn(
+                  "h-9 rounded-[9px] text-[12px] font-medium transition active:scale-[0.98]",
+                  active
+                    ? "bg-primary-soft text-primary"
+                    : "text-text-tertiary hover:bg-hover-overlay"
+                )}
+              >
+                {t(option.labelKey)}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {value.kind === "weekday" && (
+        <div className="space-y-1.5">
+          <p className="px-1 text-[11px] font-medium leading-4 text-text-tertiary">
+            {t("arrangements.time.pickWeekday")}
+          </p>
+          <div className="grid grid-cols-7 gap-1">
+            {weekdayOptions.map((option) => {
+              const active = value.weekday === option.key;
+              return (
+                <button
+                  key={option.key}
+                  type="button"
+                  onClick={() => onChange({ ...value, weekday: option.key })}
+                  className={cn(
+                    "h-8 rounded-[9px] text-[12px] font-medium transition active:scale-[0.98]",
+                    active
+                      ? "bg-primary-soft text-primary"
+                      : "text-text-tertiary hover:bg-hover-overlay"
+                  )}
+                >
+                  {t(option.labelKey)}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {value.kind === "date" && (
+        <label className="block space-y-1.5">
+          <span className="px-1 text-[11px] font-medium leading-4 text-text-tertiary">
+            {t("arrangements.time.pickDate")}
+          </span>
+          <input
+            type="date"
+            value={value.date}
+            onChange={(event) => onChange({ ...value, date: event.target.value })}
+            className="h-10 w-full rounded-[10px] border border-border-light bg-[var(--input-bg)] px-3 text-[14px] text-text outline-none placeholder:text-input-placeholder focus:bg-[var(--input-bg-focus)] focus:shadow-[0_0_0_1px_var(--primary-ring),0_0_10px_var(--primary-ring)]"
+            style={{ colorScheme: "light dark" }}
+          />
+        </label>
+      )}
+
+      {showClockInput && (
+        <div className="space-y-2">
+          <div className="space-y-1.5">
+            <p className="px-1 text-[11px] font-medium leading-4 text-text-tertiary">
+              {t("arrangements.time.pickPart")}
+            </p>
+            <div className="grid grid-cols-4 gap-1">
+              {timePartOptions.map((option) => {
+                const active = getDraftPart(value) === option.key && !getDraftClock(value);
+                return (
+                  <button
+                    key={option.labelKey}
+                    type="button"
+                    onClick={() => updatePart(option.key)}
+                    className={cn(
+                      "h-8 rounded-[9px] text-[12px] font-medium transition active:scale-[0.98]",
+                      active
+                        ? "bg-primary-soft text-primary"
+                        : "text-text-tertiary hover:bg-hover-overlay"
+                    )}
+                  >
+                    {t(option.labelKey)}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <label className="block space-y-1.5">
+            <span className="px-1 text-[11px] font-medium leading-4 text-text-tertiary">
+              {t("arrangements.time.pickClock")}
+            </span>
+            <input
+              type="time"
+              value={getDraftClock(value)}
+              onChange={(event) => updateClock(event.target.value)}
+              className="h-10 w-full rounded-[10px] border border-border-light bg-[var(--input-bg)] px-3 text-[14px] text-text outline-none placeholder:text-input-placeholder focus:bg-[var(--input-bg-focus)] focus:shadow-[0_0_0_1px_var(--primary-ring),0_0_10px_var(--primary-ring)]"
+              style={{ colorScheme: "light dark" }}
+              aria-label={t("arrangements.time.clockAria")}
+            />
+          </label>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function TextField({
   label,
@@ -1176,21 +1414,6 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
       <span className="w-[58px] shrink-0 text-text-tertiary">{label}</span>
       <div className="min-w-0 flex-1 text-text">{value}</div>
     </div>
-  );
-}
-
-function StatusPill({ label, tone }: { label: string; tone: "primary" | "muted" }) {
-  return (
-    <span
-      className={cn(
-        "inline-flex max-w-full items-center rounded-full px-2 py-0.5 text-[10px] font-medium leading-4",
-        tone === "primary"
-          ? "bg-primary-soft text-primary"
-          : "bg-fill-3 text-text-tertiary"
-      )}
-    >
-      {label}
-    </span>
   );
 }
 
@@ -1257,14 +1480,18 @@ function matchesSourceFilter(
   );
 }
 
-function getSourceFilterLabel(filter: ArrangementSourceFilter) {
-  return sourceFilters.find((item) => item.key === filter)?.label ?? "全部来源";
+function getSourceFilterLabelKey(filter: ArrangementSourceFilter) {
+  return sourceFilters.find((item) => item.key === filter)?.labelKey ?? "arrangements.source.all";
+}
+
+function getSourceTypeLabelKey(type: ArrangementSourceType) {
+  return `arrangements.source.${type}`;
 }
 
 function getEditorFormFromArrangement(arrangement: ArrangementItem): EditorForm {
   return {
     title: arrangement.title,
-    timePreset: getTimePresetFromArrangement(arrangement),
+    timeDraft: getTimeDraftFromArrangement(arrangement),
     location: arrangement.location ?? "",
     people: arrangement.people.join("、"),
     note: arrangement.note ?? "",
@@ -1274,9 +1501,9 @@ function getEditorFormFromArrangement(arrangement: ArrangementItem): EditorForm 
 function getEditorFormFromCandidate(candidate: ArrangementCandidate): EditorForm {
   return {
     title: candidate.title,
-    timePreset: "none",
-    location: "",
-    people: "",
+    timeDraft: candidate.timeDraft ?? { kind: "none" },
+    location: candidate.location ?? "",
+    people: candidate.people?.join("、") ?? "",
     note: candidate.note ?? "",
   };
 }
@@ -1287,6 +1514,80 @@ function getTimePresetFromArrangement(arrangement: ArrangementItem): Arrangement
   if (isTomorrow(arrangement.startAt)) return "tomorrow";
   if (arrangement.fuzzyTimeLabel?.includes("周末")) return "weekend";
   return "none";
+}
+
+function getTimeDraftFromArrangement(arrangement: ArrangementItem): ArrangementTimeDraft {
+  if (!arrangement.startAt) return { kind: "none" };
+
+  const date = new Date(arrangement.startAt);
+  const part = getTimePartFromLabel(arrangement.fuzzyTimeLabel);
+  const clock = arrangement.timeKind === "deadline" ? getClockInputValue(date) : undefined;
+
+  if (isToday(arrangement.startAt)) {
+    return { kind: "relativeDay", day: "today", part, clock };
+  }
+
+  if (isTomorrow(arrangement.startAt)) {
+    return { kind: "relativeDay", day: "tomorrow", part, clock };
+  }
+
+  if (
+    arrangement.fuzzyTimeLabel?.includes("周") ||
+    arrangement.fuzzyTimeLabel?.toLowerCase().includes("week") ||
+    getTimePresetFromArrangement(arrangement) === "weekend"
+  ) {
+    return {
+      kind: "weekday",
+      weekday: date.getDay() as 0 | 1 | 2 | 3 | 4 | 5 | 6,
+      part,
+      clock,
+    };
+  }
+
+  return { kind: "date", date: getDateInputValue(date), part, clock };
+}
+
+function getActiveTimeQuickKey(value: ArrangementTimeDraft) {
+  if (value.kind === "none") return "none";
+  if (value.kind === "weekday") return "weekday";
+  if (value.kind === "date") return "date";
+  if (value.day === "today") return "today";
+  return "tomorrow";
+}
+
+function getDraftPart(value: ArrangementTimeDraft): ArrangementTimePart | undefined {
+  if (value.kind === "none") return undefined;
+  return value.part;
+}
+
+function getDraftClock(value: ArrangementTimeDraft) {
+  if (value.kind === "none") return "";
+  return value.clock ?? "";
+}
+
+function getTimePartFromLabel(label?: string): ArrangementTimePart | undefined {
+  if (!label) return undefined;
+  const normalizedLabel = label.toLowerCase();
+  if (label.includes("上午") || normalizedLabel.includes("morning")) return "morning";
+  if (label.includes("下午") || normalizedLabel.includes("afternoon")) return "afternoon";
+  if (label.includes("晚上") || normalizedLabel.includes("evening")) return "evening";
+  return undefined;
+}
+
+function getTodayInputValue() {
+  return getDateInputValue(new Date());
+}
+
+function getDateInputValue(date: Date) {
+  return `${date.getFullYear()}-${padNumber(date.getMonth() + 1)}-${padNumber(date.getDate())}`;
+}
+
+function getClockInputValue(date: Date) {
+  return `${padNumber(date.getHours())}:${padNumber(date.getMinutes())}`;
+}
+
+function padNumber(value: number) {
+  return String(value).padStart(2, "0");
 }
 
 function isTomorrow(timestamp: number, now = Date.now()) {
@@ -1302,48 +1603,89 @@ function isTomorrow(timestamp: number, now = Date.now()) {
 
 function splitPeopleInput(value: string) {
   return value
-    .split(/[、,，\s]+/)
+    .split(/[、，,\s]+/)
     .map((item) => item.trim())
     .filter(Boolean);
 }
 
-function getGroupTitle(filter: ArrangementFilter) {
-  if (filter === "near") return "近期";
-  if (filter === "later") return "以后再说";
-  if (filter === "done") return "已完成";
-  return "全部安排";
+function getGroupTitleKey(filter: ArrangementFilter) {
+  if (filter === "near") return "arrangements.group.near";
+  if (filter === "later") return "arrangements.group.later";
+  if (filter === "done") return "arrangements.group.done";
+  return "arrangements.group.all";
 }
 
-function formatArrangementMeta(arrangement: ArrangementItem) {
-  const parts = [formatArrangementTime(arrangement)];
+function formatArrangementMeta(
+  arrangement: ArrangementItem,
+  t: (key: string, values?: Record<string, string | number>) => string,
+  locale: string
+) {
+  const parts = [formatArrangementTime(arrangement, t, locale)];
   if (arrangement.location) parts.push(arrangement.location);
-  if (arrangement.people.length > 0) parts.push(arrangement.people.join("、"));
+  if (arrangement.people.length > 0) {
+    parts.push(arrangement.people.join(getListSeparator(locale)));
+  }
   return parts.filter(Boolean).join(" · ");
 }
 
-function formatArrangementTime(arrangement: ArrangementItem) {
-  if (arrangement.fuzzyTimeLabel && arrangement.fuzzyTimeLabel !== "还没有时间") {
+function formatArrangementTime(
+  arrangement: ArrangementItem,
+  t: (key: string, values?: Record<string, string | number>) => string,
+  locale: string
+) {
+  if (arrangement.startAt) {
+    return formatTimeLabel(arrangement.startAt, {
+      locale,
+      today: t("arrangements.time.today"),
+      yesterday: t("time.yesterday"),
+      dayBeforeYesterday: t("time.dayBeforeYesterday"),
+    });
+  }
+
+  if (arrangement.fuzzyTimeLabel && !isLegacyNoTimeLabel(arrangement.fuzzyTimeLabel)) {
     return arrangement.fuzzyTimeLabel;
   }
 
-  if (arrangement.startAt) {
-    return formatTimeLabel(arrangement.startAt);
-  }
-
-  return "还没有时间";
+  return t("arrangements.time.noTime");
 }
 
-function getStatusLabel(status: ArrangementStatus) {
-  if (status === "done") return "已完成";
-  if (status === "later") return "以后再说";
-  if (status === "archived") return "已归档";
-  return "进行中";
+function isLegacyNoTimeLabel(label: string) {
+  return (
+    label === "还没有时间" ||
+    label === "No time yet" ||
+    label.includes("没有时间") ||
+    label.toLowerCase().includes("no time")
+  );
 }
 
-function getAiCapabilityLabel(capability: ArrangementAiCapability) {
-  if (capability === "aiAssist") return "AI 可协助";
-  if (capability === "aiExecutable") return "AI 可执行";
-  return "需要自己完成";
+function getStatusLabelKey(status: ArrangementStatus) {
+  return `arrangements.status.${status}`;
+}
+
+function getAiCapabilityLabelKey(capability: ArrangementAiCapability) {
+  return `arrangements.aiCapability.${capability}`;
+}
+
+function getEditorTitleKey(mode: EditorMode) {
+  if (mode === "edit") return "arrangements.editor.editTitle";
+  if (mode === "confirm") return "arrangements.editor.confirmTitle";
+  return "arrangements.editor.createTitle";
+}
+
+function getEditorSubmitKey(mode: EditorMode) {
+  if (mode === "edit") return "arrangements.editor.saveChanges";
+  if (mode === "confirm") return "arrangements.editor.saveCandidate";
+  return "arrangements.editor.save";
+}
+
+function getEditorCloseKey(mode: EditorMode) {
+  if (mode === "edit") return "arrangements.editor.closeEdit";
+  if (mode === "confirm") return "arrangements.editor.closeConfirm";
+  return "arrangements.editor.closeCreate";
+}
+
+function getListSeparator(locale: string) {
+  return locale.startsWith("en") ? ", " : "、";
 }
 
 function CloseIcon() {

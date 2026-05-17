@@ -270,14 +270,23 @@ export type ArrangementItem = {
 export function getInitialArrangements(): ArrangementItem[];
 export function persistArrangements(arrangements: ArrangementItem[]): void;
 export function createManualArrangement(input: ManualArrangementInput): ArrangementItem;
+export type ArrangementTimeDraft =
+  | { kind: "none" }
+  | { kind: "relativeDay"; day: "today" | "tomorrow"; part?: ArrangementTimePart; clock?: string }
+  | { kind: "weekday"; weekday: 0 | 1 | 2 | 3 | 4 | 5 | 6; part?: ArrangementTimePart; clock?: string }
+  | { kind: "date"; date: string; part?: ArrangementTimePart; clock?: string };
+export function getArrangementTimeFieldsFromDraft(
+  draft: ArrangementTimeDraft,
+  now?: number
+): Pick<ArrangementItem, "timeKind" | "startAt" | "endAt" | "fuzzyTimeLabel">;
 export function getArrangementTimeFieldsForPreset(
   preset: ArrangementTimePreset,
   now?: number
-): Pick<ArrangementItem, "timeKind" | "startAt" | "fuzzyTimeLabel">;
+): Pick<ArrangementItem, "timeKind" | "startAt" | "endAt" | "fuzzyTimeLabel">;
 export function normalizeArrangement(value: unknown, index: number): ArrangementItem | null;
 ```
 
-- **Contextual Value:** Local no-backend persistence and normalization layer for first-stage manual arrangements and future AI-generated arrangements.
+- **Contextual Value:** Local no-backend persistence and normalization layer for manual, AI-generated, and multi-granularity time arrangements.
 
 ### Arrangements Page State Flow
 
@@ -324,6 +333,88 @@ function compareByTimeThenAttention(a: ArrangementItem, b: ArrangementItem): num
 ```
 
 - **Contextual Value:** Local filtering and sorting rules that keep the top arrangements area focused on today's active items while preserving future calendar and reminder expansion paths.
+
+### Arrangement Time Draft
+
+- **File Location:** `src/data/arrangements.ts`
+- **Core Signature:**
+
+```ts
+type ArrangementTimeDraft =
+  | { kind: "none" }
+  | {
+      kind: "relativeDay";
+      day: "today" | "tomorrow";
+      part?: "morning" | "afternoon" | "evening";
+      clock?: string;
+    }
+  | {
+      kind: "weekday";
+      weekday: 1 | 2 | 3 | 4 | 5 | 6 | 0;
+      part?: "morning" | "afternoon" | "evening";
+      clock?: string;
+    }
+  | {
+      kind: "date";
+      date: string;
+      part?: "morning" | "afternoon" | "evening";
+      clock?: string;
+    };
+
+function getArrangementTimeFieldsFromDraft(
+  draft: ArrangementTimeDraft,
+  now?: number
+): Pick<ArrangementItem, "timeKind" | "startAt" | "endAt" | "fuzzyTimeLabel">;
+```
+
+- **Contextual Value:** Planned UI-layer time input contract that lets future AI and manual creation express tomorrow morning, afternoon, weekdays, exact dates, and clock times without changing the core `ArrangementItem` model.
+
+### TimeDraftSelector
+
+- **File Location:** `src/pages/Arrangements.tsx`
+- **Core Signature:**
+
+```tsx
+function TimeDraftSelector({
+  value,
+  onChange,
+}: {
+  value: ArrangementTimeDraft;
+  onChange: (value: ArrangementTimeDraft) => void;
+}): JSX.Element;
+
+const timeQuickOptions = [
+  { key: "none", label: "无时间" },
+  { key: "today", label: "今天" },
+  { key: "tomorrow", label: "明天" },
+  { key: "weekday", label: "本周" },
+  { key: "date", label: "具体日期" },
+];
+```
+
+- **Contextual Value:** Manual arrangement editing uses this component as the single UI state bridge from quick date, weekday, time part, and exact clock controls into `ArrangementTimeDraft`.
+
+### Arrangement Spotlight Mode Plan
+
+- **File Location:** `docs/arrangements-tomorrow-reminder-time-plan.md`
+- **Core Signature:**
+
+```ts
+type ArrangementSpotlightMode =
+  | "today"
+  | "tomorrow"
+  | "upcoming"
+  | "done"
+  | "empty"
+  | "calm";
+
+type ArrangementSpotlightState = {
+  mode: ArrangementSpotlightMode;
+  arrangements: ArrangementItem[];
+};
+```
+
+- **Contextual Value:** Planned top-of-page state contract that keeps today's arrangements distinct from tomorrow and upcoming reminders while reusing the existing spotlight card UI.
 
 ### Arrangement Editing And Search
 
@@ -408,7 +499,13 @@ type ArrangementCandidate = {
   id: string;
   title: string;
   note?: string;
+  confidence?: number;
+  reason?: string;
   sourceType: ArrangementSourceType;
+  semanticKey?: string;
+  timeDraft?: ArrangementTimeDraft;
+  location?: string;
+  people?: string[];
   sourceRef: ArrangementSourceRef;
   status: ArrangementCandidateStatus;
   createdBy: "validation" | "ai";
@@ -419,6 +516,8 @@ type ArrangementCandidate = {
 type ArrangementSourceDraft = {
   title: string;
   note?: string;
+  semanticKey?: string;
+  timeDraft?: ArrangementTimeDraft;
   sourceType: ArrangementSourceType;
   sourceRef: ArrangementSourceRef;
 };
@@ -431,13 +530,43 @@ function saveArrangementCandidateFromSourceDraft(
   draft: ArrangementSourceDraft
 ): ArrangementCandidate;
 
+function shouldMergeArrangementCandidates(
+  existingCandidate: ArrangementCandidate,
+  nextCandidate: ArrangementCandidate
+): boolean;
+
+function dedupeArrangementCandidates(
+  candidates: ArrangementCandidate[]
+): ArrangementCandidate[];
+
 function createArrangementFromCandidate(
   candidate: ArrangementCandidate,
   input: ManualArrangementInput
 ): ArrangementItem;
 ```
 
-- **Contextual Value:** Fourth-stage validation queue that lets quick notes and test messages become confirmable arrangement candidates before being converted into official `ArrangementItem` records.
+- **Contextual Value:** Fourth-stage validation queue that lets quick notes and test messages become confirmable arrangement candidates, with semantic-key and same-chat short-confirmation merging before conversion into official `ArrangementItem` records.
+
+### Arrangement Candidate StatusPill Display
+
+- **File Location:** `src/pages/Arrangements.tsx`
+- **Core Signature:**
+
+```tsx
+function StatusPill({
+  label,
+  tone,
+}: {
+  label: string;
+  tone: "primary" | "muted";
+}): JSX.Element;
+
+// AI candidates render candidate.title directly and use:
+<StatusPill label="AI 建议" tone="primary" />;
+<StatusPill label={getSourceTypeLabel(candidate.sourceType)} tone="muted" />;
+```
+
+- **Contextual Value:** Shared small capsule style for AI suggestion and source/status labels, keeping arrangement cards aligned with settings-page `bg-primary-soft text-primary` and `bg-fill-3 text-text-tertiary` tokens.
 
 ### Arrangement AI Recognition Service Plan
 
@@ -448,6 +577,9 @@ function createArrangementFromCandidate(
 type AiArrangementCandidateDraft = {
   title: string;
   note?: string;
+  timeDraft?: ArrangementTimeDraft;
+  location?: string;
+  people?: string[];
   confidence?: number;
   reason?: string;
 };
@@ -468,3 +600,301 @@ function createArrangementCandidateFromAiDraft(
 ```
 
 - **Contextual Value:** Planned service boundary for real AI arrangement extraction that can feed the existing candidate queue without changing the official `ArrangementItem` model or confirmation UI.
+
+### AI API Settings Data Layer
+
+- **File Location:** `src/data/aiApiSettings.ts`
+- **Core Signature:**
+
+```ts
+type AiApiSettings = {
+  enabled: boolean;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+};
+
+const aiApiSettingsStorageKey = "arkme-demo.aiApiSettings";
+
+function getAiApiSettings(): AiApiSettings;
+function persistAiApiSettings(settings: AiApiSettings): void;
+function isAiApiConfigured(settings?: AiApiSettings): boolean;
+function useAiApiSettings(): AiApiSettings;
+```
+
+- **Contextual Value:** Browser-local AI preference contract for enable state, Base URL, API Key, and model; the browser sends these only to the same-origin recognition proxy, which forwards to the configured Responses API endpoint.
+
+### Arrangement AI Recognition Service
+
+- **File Location:** `src/services/arrangementAi.ts`
+- **Core Signature:**
+
+```ts
+type AiArrangementRecognitionResult = {
+  hasArrangement: boolean;
+  title: string;
+  timeDraft?: ArrangementTimeDraft;
+  location?: string;
+  people?: string[];
+  note?: string;
+  confidence?: number;
+  reason?: string;
+};
+
+async function recognizeArrangementCandidate(
+  sourceDraft: ArrangementSourceDraft,
+  options?: { locale?: string; languageName?: string }
+): Promise<AiArrangementRecognitionResult>;
+
+function getResponsesEndpoint(baseUrl: string): string;
+
+const arrangementRecognitionSchema = {
+  required: ["hasArrangement", "title", "timeDraft", "location", "people", "note", "confidence", "reason"],
+  properties: {
+    timeDraft: {
+      required: ["kind", "day", "weekday", "date", "part", "clock"],
+      properties: {
+        kind: { enum: ["none", "relativeDay", "weekday", "date"] },
+      },
+    },
+  },
+};
+```
+
+- **Contextual Value:** Real AI extraction boundary that calls same-origin `/api/arrangement-recognition`, turns conversation-context source drafts into structured candidate summaries for title, time, location, people, and notes, and keeps official arrangements user-confirmed; the proxy target accepts either a base `/v1` URL or a full `/responses` URL.
+
+### Arrangement Candidate Note Localization
+
+- **File Location:** `src/data/arrangements.ts`
+- **Core Signature:**
+
+```ts
+type ArrangementNoteLocale = "zh-CN" | "zh-TW" | "en-US" | "ar-SA";
+
+function getArrangementNoteLanguageName(locale: string): string;
+
+function formatArrangementCandidateNote(
+  parts: {
+    sourceLabel?: string;
+    confirmationText?: string;
+    modifierText?: string;
+    arrangementText?: string;
+    timeDraft?: ArrangementTimeDraft;
+  },
+  locale: string
+): string;
+
+function sanitizeArrangementCandidateNote(
+  note: string | undefined,
+  locale?: string
+): string;
+```
+
+- **Contextual Value:** Shared candidate-note boundary that keeps AI and local fallback notes as one user-facing sentence aligned with the app's current `resolvedLocale`, covering time, requester, requested action, and user reply while stripping internal labels such as `Source` and `Confirmation reply`.
+
+### Arrangement Recognition Proxy API
+
+- **File Location:** `server/arrangementRecognitionProxy.ts`
+- **Core Signature:**
+
+```ts
+type ArrangementRecognitionApiRequest = {
+  sourceDraft: ArrangementSourceDraft;
+  model?: string;
+};
+
+type ArrangementRecognitionApiResponse =
+  | { ok: true; result: AiArrangementRecognitionResult }
+  | { ok: false; error: string };
+
+async function arrangementRecognitionProxy(
+  request: IncomingMessage,
+  response: ServerResponse
+): Promise<void>;
+```
+
+- **Contextual Value:** Same-origin backend boundary that avoids browser-side CORS failures while preserving the current settings-page Base URL/API Key/Model inputs and the existing arrangement candidate flow.
+
+### Recent Arrangement Scan Action
+
+- **File Location:** `src/pages/Home.tsx`
+- **Core Signature:**
+
+```ts
+type RecentArrangementScanState = {
+  state: "idle" | "scanning" | "success" | "empty" | "error" | "unconfigured";
+  message: string;
+};
+
+async function scanRecentConversationsForArrangements(): Promise<void>;
+
+function AiApiSettingsScreen(props: {
+  onScanRecentConversations: () => void;
+  scanState: RecentArrangementScanState;
+}): JSX.Element;
+```
+
+- **Contextual Value:** Settings-level batch entry that reuses the single-record AI recognition service and candidate queue to scan recent self/private/group conversations without directly creating official arrangements.
+
+### AI Recognition Diagnostics
+
+- **File Location:** `src/data/aiRecognitionDiagnostics.ts`
+- **Core Signature:**
+
+```ts
+type AiRecognitionDiagnosticStage =
+  | "request"
+  | "success"
+  | "empty"
+  | "http-error"
+  | "network-error"
+  | "parse-error"
+  | "unconfigured"
+  | "fallback";
+
+type AiRecognitionDiagnosticEntry = {
+  action: "single" | "quick-scan";
+  stage: AiRecognitionDiagnosticStage;
+  endpoint?: string;
+  model?: string;
+  hasApiKey: boolean;
+  apiKeyTail?: string;
+  httpStatus?: number;
+  errorMessage?: string;
+  responseBodySnippet?: string;
+  fallbackUsed?: boolean;
+};
+
+function appendAiRecognitionDiagnostic(
+  entry: Omit<AiRecognitionDiagnosticEntry, "id" | "timestamp">
+): void;
+
+function useAiRecognitionDiagnostics(): AiRecognitionDiagnosticEntry[];
+```
+
+- **Contextual Value:** Browser-local ring buffer for proving whether AI recognition used the same-origin proxy, which target `/responses` endpoint/model it forwarded to, and why quick scan fell back to local rules without exposing the full API key.
+
+### AI Recognition Switch
+
+- **File Location:** `src/pages/Home.tsx`
+- **Core Signature:**
+
+```tsx
+function AiRecognitionSwitch(props: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}): JSX.Element;
+```
+
+- **Contextual Value:** Reusable settings switch for the browser-local AI recognition enable state; the thumb uses explicit pixel dimensions against a fixed 56x32 track so customized Tailwind spacing tokens cannot move it off center.
+
+### Preferences And Translation Context
+
+- **File Location:** `src/settings/preferences.ts`
+- **Core Signature:**
+
+```ts
+type PreferencesContextValue = {
+  resolvedLocale: string;
+  direction: "ltr" | "rtl";
+  setLocaleCode: (value: LocaleCode) => void;
+  t: (
+    key: TranslationKey,
+    values?: Record<string, string | number>
+  ) => string;
+};
+
+export function PreferencesProvider({ children }: { children: React.ReactNode }): JSX.Element;
+export function usePreferences(): PreferencesContextValue;
+```
+
+- **Contextual Value:** Central app-wide language and theme boundary; new arrangement and AI settings UI reuse `t()` with fallback and interpolation instead of introducing a separate i18n mechanism.
+
+### MetaPill
+
+- **File Location:** `src/components/MetaPill.tsx`
+- **Core Signature:**
+
+```tsx
+export type MetaPillTone = "primary" | "muted" | "danger";
+
+export default function MetaPill({
+  label,
+  tone = "muted",
+  className,
+}: {
+  label: string;
+  tone?: MetaPillTone;
+  className?: string;
+}): JSX.Element;
+```
+
+- **Contextual Value:** Shared lightweight capsule for arrangement statuses, source tags, AI settings enable state, and diagnostic stages so new metadata labels keep one visual contract across pages.
+
+### Local Arrangement Candidate Derivation
+
+- **File Location:** `src/pages/Home.tsx`
+- **Core Signature:**
+
+```ts
+function isLocalShortConfirmationText(value: string): boolean;
+
+type LocalArrangementSemanticResult = {
+  baseRecord: RecordItem;
+  modifierRecord?: RecordItem;
+  confirmationRecord?: RecordItem;
+  timeDraft?: ArrangementTimeDraft;
+};
+
+function isLocalTimeChangeText(value: string): boolean;
+
+function getLocalArrangementSemanticResult(
+  record: RecordItem,
+  contextRecords: RecordItem[]
+): LocalArrangementSemanticResult;
+
+function parseLocalArrangementTimeDraftFromText(
+  text: string
+): ArrangementTimeDraft | undefined;
+
+function mergeLocalArrangementTimeDraft(
+  baseDraft: ArrangementTimeDraft | undefined,
+  overrideDraft: ArrangementTimeDraft | undefined,
+  overrideText?: string
+): ArrangementTimeDraft | undefined;
+
+function deriveLocalArrangementCandidateDraft(
+  record: RecordItem,
+  contextRecords: RecordItem[]
+): ArrangementSourceDraft;
+```
+
+- **Contextual Value:** Local fallback path that lets no-API arrangement recognition infer the real candidate from conversation context, normalize short confirmations like "能的", merge reschedule messages, and prefill time drafts for confirmation.
+
+### Arrangement Candidate Source Boundary
+
+- **File Location:** `src/data/arrangements.ts`, `src/types/arrangement.ts`
+- **Core Signature:**
+
+```ts
+type ArrangementSourceRef = {
+  id: string;
+  type: ArrangementSourceType;
+  title: string;
+  excerpt: string;
+  createdAt: number;
+  conversationId?: string;
+  messageId?: string;
+};
+
+type ArrangementCandidate = {
+  sourceRef: ArrangementSourceRef;
+  semanticKey?: string;
+};
+
+type ArrangementItem = {
+  sourceRefs: ArrangementSourceRef[];
+};
+```
+
+- **Contextual Value:** Candidate storage currently keeps one primary source while confirmed arrangements keep multiple sources; future multi-user same-event association should extend candidates with a compatible `sourceRefs` collection before creating final arrangements.

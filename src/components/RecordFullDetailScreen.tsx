@@ -12,6 +12,10 @@ type RecordFullDetailScreenProps = {
   onCreateExtension: (record: RecordItem, content: string) => void;
   onOpenSource?: (source: RecordSourceConversation) => void;
   onCreateArrangementCandidate?: (record: RecordItem) => void;
+  onRecognizeArrangementCandidate?: (record: RecordItem) => void;
+  arrangementAiState?: "idle" | "loading" | "success" | "empty" | "error" | "unconfigured";
+  arrangementAiMessage?: string;
+  onOpenAiSettings?: () => void;
 };
 
 export default function RecordFullDetailScreen({
@@ -21,6 +25,10 @@ export default function RecordFullDetailScreen({
   onCreateExtension,
   onOpenSource,
   onCreateArrangementCandidate,
+  onRecognizeArrangementCandidate,
+  arrangementAiState = "idle",
+  arrangementAiMessage = "",
+  onOpenAiSettings,
 }: RecordFullDetailScreenProps) {
   const { t } = usePreferences();
   const candidateProfile = useCandidateProfile();
@@ -74,6 +82,10 @@ export default function RecordFullDetailScreen({
           canCreateArrangementCandidate={canCreateArrangementCandidate}
           onOpenSource={onOpenSource}
           onCreateArrangementCandidate={onCreateArrangementCandidate}
+          onRecognizeArrangementCandidate={onRecognizeArrangementCandidate}
+          arrangementAiState={arrangementAiState}
+          arrangementAiMessage={arrangementAiMessage}
+          onOpenAiSettings={onOpenAiSettings}
           selfDisplayName={selfDisplayName}
           selfAvatarLabel={selfAvatarLabel}
         />
@@ -100,6 +112,10 @@ function MainRecordCard({
   canCreateArrangementCandidate,
   onOpenSource,
   onCreateArrangementCandidate,
+  onRecognizeArrangementCandidate,
+  arrangementAiState,
+  arrangementAiMessage,
+  onOpenAiSettings,
   selfDisplayName,
   selfAvatarLabel,
 }: {
@@ -109,10 +125,16 @@ function MainRecordCard({
   canCreateArrangementCandidate: boolean;
   onOpenSource?: (source: RecordSourceConversation) => void;
   onCreateArrangementCandidate?: (record: RecordItem) => void;
+  onRecognizeArrangementCandidate?: (record: RecordItem) => void;
+  arrangementAiState: NonNullable<RecordFullDetailScreenProps["arrangementAiState"]>;
+  arrangementAiMessage: string;
+  onOpenAiSettings?: () => void;
   selfDisplayName: string;
   selfAvatarLabel: string;
 }) {
   const { t } = usePreferences();
+  const canRecognizeArrangementCandidate =
+    Boolean(onRecognizeArrangementCandidate) && canCreateArrangementCandidate;
 
   return (
     <article className="w-full rounded-b-[8px] border-b border-[var(--record-detail-main-border)] bg-[var(--record-detail-main-bg)]">
@@ -167,17 +189,48 @@ function MainRecordCard({
           </button>
         )}
         {canCreateArrangementCandidate && (
-          <button
-            type="button"
-            onClick={() => onCreateArrangementCandidate?.(record)}
-            className="mt-3 flex h-9 w-full items-center justify-center rounded-[11px] bg-primary-soft text-[13px] font-medium text-primary transition active:scale-[0.98]"
-          >
-            加入安排候选
-          </button>
+          <div className="mt-3 space-y-2">
+            <button
+              type="button"
+              onClick={() => onCreateArrangementCandidate?.(record)}
+              className="flex h-9 w-full items-center justify-center rounded-[11px] bg-primary-soft text-[13px] font-medium text-primary transition active:scale-[0.98]"
+            >
+              {t("recordDetail.arrangement.addCandidate")}
+            </button>
+            {canRecognizeArrangementCandidate && (
+              <button
+                type="button"
+                onClick={
+                  arrangementAiState === "unconfigured"
+                    ? onOpenAiSettings
+                    : () => onRecognizeArrangementCandidate?.(record)
+                }
+                disabled={arrangementAiState === "loading"}
+                className="flex h-9 w-full items-center justify-center rounded-[11px] bg-primary text-[13px] font-medium text-on-primary transition active:scale-[0.98] disabled:opacity-70"
+              >
+                {getArrangementAiActionLabel(arrangementAiState, t)}
+              </button>
+            )}
+            {arrangementAiMessage && (
+              <p className="rounded-[10px] bg-[var(--record-detail-muted-bg)] px-3 py-2 text-[12px] leading-5 text-text-tertiary">
+                {arrangementAiMessage}
+              </p>
+            )}
+          </div>
         )}
       </div>
     </article>
   );
+}
+
+function getArrangementAiActionLabel(
+  state: NonNullable<RecordFullDetailScreenProps["arrangementAiState"]>,
+  t: (key: string) => string
+) {
+  if (state === "loading") return t("recordDetail.arrangement.recognizing");
+  if (state === "unconfigured") return t("recordDetail.arrangement.configureFirst");
+  if (state === "success") return t("recordDetail.arrangement.recognizeAgain");
+  return t("recordDetail.arrangement.aiRecognize");
 }
 
 function SimilarRecords() {

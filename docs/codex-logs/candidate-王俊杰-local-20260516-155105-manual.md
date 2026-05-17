@@ -200,10 +200,10 @@
 ## 2026-05-16 18:58:03 CST (+0800)
 
 ### 用户输入
-梳理一下已完成与尚未完成的功能
+今天值得留意的安排会包括所有时间的内容，而将所有方案设置为已完成时，会提示现在没有必须立刻处理的安排，请给出一个优化方案，生成一个新的md
 
 ### AI 最终输出
-已先完成现状梳理并产出新的优化方案文档 `docs/arrangements-spotlight-optimization-plan.md`。文档明确列出「安排」模块第一阶段已完成的主入口、数据层、页面、创建、详情、状态流转和记录同步，也列出尚未完成的 AI 识别、合并拆分、日历提醒、AI 执行、编辑搜索等能力；随后针对“今天值得留意”区域给出更严格的今天筛选逻辑和四种状态文案方案，解决当前把所有时间的 active 安排都纳入今天区域、以及全完成后提示语过于普通的问题。
+已生成 `docs/arrangements-spotlight-optimization-plan.md`。方案先梳理了「安排」模块当前已完成和未完成的功能，再聚焦“今天值得留意”区域的聚合问题：当前规则会把所有 active 安排按关注分取前两条，导致后天、周末、无明确时间的内容也可能混入今天区域；同时所有方案都完成后只显示“现在没有必须立刻处理的安排”，缺少完成反馈。文档给出更严格的今天筛选逻辑、四种顶部状态文案、排序建议、实现方式和验收标准。
 
 ### 本轮改动文件
 - docs/arrangements-spotlight-optimization-plan.md
@@ -263,19 +263,24 @@ PLEASE IMPLEMENT THIS PLAN: 「安排」模块第一阶段最终实施计划，�
 ## 2026-05-16 19:20:21 CST (+0800)
 
 ### 用户输入
-继续
+根据此文档给我一份第二阶段的迭代方案
 
 ### AI 最终输出
-已继续完成：我把「已完成 / 尚未完成」梳理和「今天值得留意」优化方案合并写入了新文档：`docs/arrangements-spotlight-optimization-plan.md`。核心优化方向是：`今天值得留意` 只展示 `active` 且时间落在今天的安排；未来、以后再说、已完成分别进入更准确的空状态提示，避免“所有时间都进今天”和“全完成后仍提示必须立刻处理”的语义错位。我也已同步记录本轮迭代到候选人 Markdown 日志和 `src/data/aiConversationLog.ts`，并完成验证：`C:\nvm4w\nodejs\pnpm.CMD verify:answer` 通过。
+已根据 `docs/arrangements-spotlight-optimization-plan.md` 生成第二阶段迭代方案 `docs/arrangements-phase-two-iteration-plan.md`。方案把第二阶段收束为「今天值得留意」聚合逻辑和顶部状态反馈优化，明确复用现有 `ArrangementItem`、`Arrangements` 页面、安排卡片、筛选段、创建 Sheet、详情 Sheet 和 localStorage 数据层，不扩展到 AI、日历或通知。已同步将计划中的 `TodaySpotlightSection` 记录到 `docs/interface_cache.md`，方便后续实现时沿用。
 
 ### 本轮改动文件
-- docs/arrangements-spotlight-optimization-plan.md
+- docs/arrangements-phase-two-iteration-plan.md
+- docs/interface_cache.md
 - docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
 - src/data/aiConversationLog.ts
 
 ### 验证结果
-- 已确认优化方案文档存在
-- `C:\nvm4w\nodejs\pnpm.CMD verify:answer` 通过
+- 已确认上一轮最终回复补写到当前候选人个人 Markdown 日志和 src/data/aiConversationLog.ts
+- 已读取 docs/arrangements-spotlight-optimization-plan.md
+- 已生成 docs/arrangements-phase-two-iteration-plan.md
+- 已更新 docs/interface_cache.md
+- `C:\nvm4w\nodejs\pnpm.CMD verify:answer` 普通 PowerShell 返回“拒绝访问”
+- 已请求沙箱外执行 `C:\nvm4w\nodejs\pnpm.CMD verify:answer`，通过
 
 ## 2026-05-16 19:20:21 CST (+0800)
 
@@ -811,3 +816,734 @@ PLEASE IMPLEMENT THIS PLAN: 「安排」第四阶段最终计划：AI 候选验�
 - `C:\nvm4w\nodejs\pnpm.CMD verify:answer` 通过
 - git commit -m "Continue arrangements AI candidate work" 成功，提交 fdba5c4
 - git push loveyou9t main 成功，pre-push 自动 verify:answer 通过
+## 2026-05-17 02:22:52 CST (+0800)
+
+### 用户输入
+告诉我为什么http://localhost:5173/和http://127.0.0.1:5173/中的页面有差。
+### AI 最终输出
+### 本轮改动文件
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- `Invoke-WebRequest http://localhost:5173/` 返回同一份入。HTML
+- `Invoke-WebRequest http://127.0.0.1:5173/` 返回同一份入。HTML
+- `src/App.tsx` 未发现按主机名分。
+## 2026-05-17 02:27:47 CST (+0800)
+
+### 用户输入
+http://127.0.0.1:5173/中没有提醒用户明天帮忙带早餐，但是localhost中却有，分析原因
+
+### AI 最终输出
+### 本轮改动文件
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- 已确认上一轮记录存在于当前候选人 Markdown 日志。`src/data/aiConversationLog.ts`
+- 已读。`src/data/arrangements.ts`，确。`getInitialArrangements()` 优先读取 `arkme-demo.arrangements`
+- 已确认默。`demo-breakfast` 数据存在。`getDemoArrangements()`
+- 已确。`localhost` 。`127.0.0.1` 属于不同 origin，本地存储不共享
+
+## 2026-05-17 02:35:38 CST (+0800)
+
+### 用户输入
+给我一个修复这个逻辑的方案，当今日没有提醒时，需要提醒用户明天别忘了，还有时间我希望有多重定义，例如明天上午或者下午，具体日期，这周几或者具体到几点，给我一个新的md
+
+### AI 最终输出
+### 本轮改动文件
+- docs/arrangements-tomorrow-reminder-time-plan.md
+- docs/interface_cache.md
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- 已确认上一轮分析记录存在于当前候选人 Markdown 日志。`src/data/aiConversationLog.ts`
+- 已读。`src/pages/Arrangements.tsx` 。`TodaySpotlightSection`、`shouldShowInTodaySpotlight`、编。Sheet 时间选项
+- 已读。`src/data/arrangements.ts` 。`ArrangementTimePreset` 和时间字段转换逻辑
+- 已新。`docs/arrangements-tomorrow-reminder-time-plan.md`
+- 已更。`docs/interface_cache.md` 记录时间草稿和顶。Spotlight 状态计。
+## 2026-05-17 02:34:12 CST (+0800)
+
+### 用户输入
+现在请你对AI接入做最后的计划，要求新标签风格与其他页面风格要统一，在最佳效果上尽可能功能复用，当前的可能是安排主标题与用户的回答是同一句，我需要你在AI接入时对这里进行修改，直接告诉用户是否是有这个安。
+### AI 最终输出
+### 本轮改动文件
+- 。
+### 验证结果
+- 已只读复核当前设置页、候选卡、候选数据层和详情页入口
+- 已输出最。`<proposed_plan>`
+
+## 2026-05-17 02:35:02 CST (+0800)
+
+### 用户输入
+API配置放在设置中修。
+### AI 最终输出
+### 本轮改动文件
+- 。
+### 验证结果
+- 已只读复。`SettingsScreen`、`AppearanceStyleScreen`、偏。localStorage 和候选相关入。- 已输出更新后的最。`<proposed_plan>`
+
+## 2026-05-17 02:42:55 CST (+0800)
+
+### 用户输入
+PLEASE IMPLEMENT THIS PLAN: 「安排」AI 接入最终实施计划：设置内配。API。接入真。AI 识别安排能力，在「我。- 设置」中维护 API Base URL、API Key、Model 和启用状态；详情页新。AI 识别安排按钮；AI 返回候选时进入现有候选队列；候选卡主标题改。`AI 判断：有安排`，不再复述用户原文。
+### AI 最终输出
+### 本轮改动文件
+- src/data/aiApiSettings.ts
+- src/services/arrangementAi.ts
+- src/data/arrangements.ts
+- src/pages/Home.tsx
+- src/pages/Arrangements.tsx
+- src/components/RecordDetailSheet.tsx
+- src/components/RecordFullDetailScreen.tsx
+- docs/interface_cache.md
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- 已补齐上一轮两。AI 接入计划记录到当前候选人 Markdown 日志。`src/data/aiConversationLog.ts`
+- `git diff --check` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD lint` 普通执行被当前沙箱拒绝访问，沙箱外执行通过
+- `C:\nvm4w\nodejs\pnpm.CMD build` 沙箱外执行通过
+## 2026-05-17 03:09:23 CST (+0800)
+
+### 用户输入
+PLEASE IMPLEMENT THIS PLAN: 选择时间模块最终实施计划。将「安排」创。编辑 Sheet 中现有的 `无时。/ 今天 / 明天 / 周末` 四选一时间模块，升级为统一风格的多粒度时间选择模块，支持明天上午、明天下午、本周几、具体日期、具体几点，并复用现有风格和数据模型。
+### AI 最终输出
+### 本轮改动文件
+- src/data/arrangements.ts
+- src/pages/Arrangements.tsx
+- docs/interface_cache.md
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- 已确认上一轮记录存在于当前候选人 Markdown 日志。`src/data/aiConversationLog.ts`
+- `C:\nvm4w\nodejs\pnpm.CMD lint` 沙箱外执行通过
+- `C:\nvm4w\nodejs\pnpm.CMD build` 沙箱外执行通过
+- `git diff --check` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD verify:answer` 沙箱外执行通过
+
+## 2026-05-17 03:22:14 CST (+0800)
+
+### 用户输入
+乱码了请你修。
+### AI 最终输出
+### 本轮改动文件
+- src/pages/Arrangements.tsx
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- 已读。`docs/candidate-rules.md` 并确认上一轮记录存在于候选人 Markdown 日志。`src/data/aiConversationLog.ts`
+- 使用 Node 读取真实 UTF-8 内容扫描 `src/pages/Arrangements.tsx` 。`src/data/arrangements.ts`，未发现残留乱码命中
+- `C:\nvm4w\nodejs\pnpm.CMD lint` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD build` 通过
+
+## 2026-05-17 03:34:49 CST (+0800)
+
+### 用户输入
+按钮位置不对，请你在添加API这里加一个快速扫描近期对话的可能安排（例如一周）的功。
+### AI 最终输出
+### 本轮改动文件
+- src/pages/Home.tsx
+- docs/interface_cache.md
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- 已读。`docs/candidate-rules.md` 并确认上一轮记录存在于候选人 Markdown 日志。`src/data/aiConversationLog.ts`
+- `C:\nvm4w\nodejs\pnpm.CMD lint` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD build` 通过
+- 浏览器后台检。`http://127.0.0.1:5173/`，确认「AI 接入设置」页出现“快速扫描”按钮且未配。Key 时为禁用。
+## 2026-05-17 03:40:29 CST (+0800)
+
+### 用户输入
+报错了Failed to fetch找出原因
+
+### AI 最终输出
+### 本轮改动文件
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- 已读。`docs/candidate-rules.md` 并确认上一轮记录存在于候选人 Markdown 日志。`src/data/aiConversationLog.ts`
+- 已读。`src/services/arrangementAi.ts`，确认请求由浏览器端直接发往 `${baseUrl}/responses`
+- 已读。`vite.config.ts` 。`package.json`，确认项目当前没有代理或后端 API 转发配置
+## 2026-05-17 04:06:07 CST (+0800)
+
+### 用户输入
+要求制定「无 API 候选识别与启用开关错位修复计划」：修复 AI 接入设置启用开关对齐；。API 时短确认回复要回溯同会话上一条对方消息作为候选标题，并本地拆出时间。
+### AI 最终输出
+### 本轮改动文件
+- 。
+### 验证结果
+- 计划阶段，未修改代码
+## 2026-05-17 04:15:13 CST (+0800)
+
+### 用户输入
+PLEASE IMPLEMENT THIS PLAN: 实现「无 API 候选识别与启用开关错位修复计划」，包括 AI 接入设置开关对齐、无 API 本地候选推断、短确认回溯对方消息、本地时间拆解和快速扫描本地规则。
+### AI 最终输出
+### 本轮改动文件
+- src/pages/Home.tsx
+- docs/interface_cache.md
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- `C:\nvm4w\nodejs\pnpm.CMD lint` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD build` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD verify:answer` 通过
+## 2026-05-17 04:24:42 CST (+0800)
+
+### 用户输入
+更改时间也要适配，并给出截图：面试官先问“你明天下午能来公司面试吗”，用户回复“可以的”，随后面试官问“改到晚上可以吗”，用户再次回复“可以的”。
+### AI 最终输出
+### 本轮改动文件
+- 。
+### 验证结果
+- 计划阶段，未修改代码
+## 2026-05-17 04:28:13 CST (+0800)
+
+### 用户输入
+PLEASE IMPLEMENT THIS PLAN: 实现「改期消息本地候选识别适配计划」，让“改到晚上可以吗”这类改期消息继承前文完整安排并覆盖时间。
+### AI 最终输出
+### 本轮改动文件
+- src/pages/Home.tsx
+- docs/interface_cache.md
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- `C:\nvm4w\nodejs\pnpm.CMD lint` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD build` 通过
+- 本地规则自测：`明天下午` + `改到晚上可以吗` => `{ kind: "relativeDay", day: "tomorrow", part: "evening" }`
+- `C:\nvm4w\nodejs\pnpm.CMD verify:answer` 通过
+
+## 2026-05-17 04:27:13 CST (+0800)
+
+### 用户输入
+Failed To Fetch 后续修复。本轮按钮位置修复不解决 Failed to fetch 根因。根因是浏览器前端直。`${baseUrl}/responses`，会遇到 CORS/预检拦截。后续应单独做一轮代理改造：前端改为请求同源 `/api/arrangement-recognition`，本。Node/Vite 中间层或轻量服务端转发到 OpenAI，API Key 不再从浏览器直接发给 OpenAI。请根据这个写一版最小后端解决方案，生成一。md。
+### AI 最终输出
+### 本轮改动文件
+- docs/arrangements-ai-proxy-minimal-backend-plan.md
+- docs/interface_cache.md
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- 已读。`docs/candidate-rules.md` 并确认上一轮记录存在于当前候选人 Markdown 日志。`src/data/aiConversationLog.ts`
+- `C:\nvm4w\nodejs\pnpm.CMD setup:git-hooks` 首次在沙箱内执行被拒绝访问，提权后执行通过
+- 已读。`src/services/arrangementAi.ts`、`vite.config.ts` 。`package.json`，确认当前浏览器直连 OpenAI Responses API 且尚无本地代。- `C:\nvm4w\nodejs\pnpm.CMD verify:codex-log` 首次在沙箱内执行被拒绝访问，提权后执行通过
+- `C:\nvm4w\nodejs\pnpm.CMD verify:answer` 首次在沙箱内执行被拒绝访问，提权后执行通过
+
+## 2026-05-17 14:05:22 CST (+0800)
+
+### 用户输入
+现在请你对AI后端模块做最后的计划，要求新标签风格与其他页面风格要统一，在最佳效果上尽可能功能复用，对启用AI识别开关错误效果修复。
+### AI 最终输出
+### 本轮改动文件
+- 。
+### 验证结果
+- 计划阶段，未修改代码
+- 已只读检。`src/pages/Home.tsx`、`src/data/aiApiSettings.ts`、`src/services/arrangementAi.ts`、`docs/arrangements-ai-proxy-minimal-backend-plan.md`
+
+## 2026-05-17 14:42:00 CST (+0800)
+
+### 用户输入
+继续。继续实施上一。AI 后端模块最终计划：同源后端代理、前端改造、AI 设置页风格统一和启。AI 识别开关修复。
+### AI 最终输出
+### 本轮改动文件
+- server/arrangementRecognitionProxy.ts
+- vite.config.ts
+- tsconfig.node.json
+- src/services/arrangementAi.ts
+- src/data/aiApiSettings.ts
+- src/pages/Home.tsx
+- docs/interface_cache.md
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- C:\nvm4w\nodejs\pnpm.CMD lint 通过
+- C:\nvm4w\nodejs\pnpm.CMD build 通过，Vite 仅提。chunk size warning
+- C:\nvm4w\nodejs\pnpm.CMD verify:codex-log 通过
+- C:\nvm4w\nodejs\pnpm.CMD verify:answer 通过，Vite 仅提。chunk size warning
+## 2026-05-17 15:29:40 CST (+0800)
+
+### 用户输入
+目前的安排页面中的编辑时间这里有明天，明天上午和明天下午这样的重复选项，把明天上下午删掉然后选择时间这个模块重新排版。随后用户要求继续完成本轮收口。
+### AI 最终输出
+### 本轮改动文件
+- src/pages/Arrangements.tsx
+- src/pages/Home.tsx
+- docs/interface_cache.md
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- `C:\nvm4w\nodejs\pnpm.CMD setup:git-hooks` 通过（沙箱内拒绝访问后提权执行）
+- `C:\nvm4w\nodejs\pnpm.CMD lint` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD build` 通过，Vite 仅提。chunk size warning
+- 浏览器打开 `http://127.0.0.1:5173/` 并切换到安排页成功；自动化点击“新增安排”时超时，未完成截图验证
+
+## 2026-05-17 15:33:50 CST (+0800)
+
+### 用户输入
+PLEASE IMPLEMENT THIS PLAN: 恢复 AI 设置。API Key / Base URL / Model 输入，按浏览器本地保存并直连 OpenAI；页面改回中文，重做启用 AI 识别开关动画；修复未启。AI 时“可能是安排”候选区重复，同一会话安排提问、确认回复、改期回复合并成一条候选。
+### AI 最终输出
+### 本轮改动文件
+- src/data/aiApiSettings.ts
+- src/services/arrangementAi.ts
+- src/data/arrangements.ts
+- src/pages/Home.tsx
+- src/pages/Arrangements.tsx
+- docs/interface_cache.md
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- C:\nvm4w\nodejs\pnpm.CMD lint 通过
+- C:\nvm4w\nodejs\pnpm.CMD build 通过，Vite 仅提。chunk size warning
+- C:\nvm4w\nodejs\pnpm.CMD verify:codex-log 通过
+- C:\nvm4w\nodejs\pnpm.CMD verify:answer 通过，Vite 仅提示 chunk size warning
+
+## 2026-05-17 15:49:24 CST (+0800)
+
+### 用户输入
+先修复一下乱码
+
+### AI 最终输出
+已修复当前用户可见代码中的残留乱码：安排页标题、副标题、搜索无障碍文案、今日关注标题、上下文标签、星期/时段/日期选择文案已恢复为正常中文；详情 Sheet 的“加入安排候选”和 AI 识别按钮文案恢复为正常中文；首页快速搜索分类正则中的坏编码关键词替换为正常中文关键词；接口缓存中的 TimeDraftSelector 示例文案也已修正。已扫描主要源文件确认不再命中明显乱码片段，历史对话日志中的旧乱码记录未做大面积重写，以免改变既有迭代记录语义。
+
+### 本轮改动文件
+- src/pages/Arrangements.tsx
+- src/pages/Home.tsx
+- src/components/RecordDetailSheet.tsx
+- docs/interface_cache.md
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- C:\nvm4w\nodejs\pnpm.CMD lint 通过
+- C:\nvm4w\nodejs\pnpm.CMD build 通过，Vite 仅提示 chunk size warning
+- rg 扫描主要源文件与接口缓存，未再命中明显乱码片段
+## 2026-05-17 15:57:31 CST (+0800)
+
+### 用户输入
+现在选择具体时间和日期的选项框底色在深色模式下仍为白色，请修复
+
+### AI 最终输出
+已修复安排页选择具体日期和具体时间输入框在深色模式下仍显示白底的问题：两个原生 `date` / `time` 输入框现在使用主题输入框 token `--input-bg` 和 `--input-bg-focus`，深色模式下会跟随当前主题变为深色背景；同时显式设置 `color-scheme: light dark`，让原生日期/时间控件图标和内部 UI 跟随系统主题。可在移动端 Demo 入口 `http://127.0.0.1:5173/` 测试安排页。
+
+### 本轮改动文件
+- src/pages/Arrangements.tsx
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- `C:\nvm4w\nodejs\pnpm.CMD lint` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD build` 通过，Vite 仅提示 chunk size warning
+- 浏览器读取当前深色主题 token：`--input-bg` 为 `#1B1B1B`，`--input-bg-focus` 为 `#202020`
+
+## 2026-05-17 16:21:03 CST (+0800)
+
+### 用户输入
+请你阅读设置中的AI设置代码，修改该按钮，该按钮中间的圆形错位了，修复了几遍没修好
+
+### AI 最终输出
+已修复 AI 接入设置页“启用 AI 识别”开关圆点错位问题：根因是项目 Tailwind spacing token 将 `h-6/w-6/translate-x-6` 解析为 32px，导致圆点与 32px 高轨道等高。现在开关轨道、圆点和位移都改为显式像素值，轨道固定 56x32，圆点固定 24x24，左右/上下留白稳定为 4px；并在接口缓存记录该可复用开关，避免后续再踩 spacing token 的坑。可在移动端 Demo 入口 `http://127.0.0.1:5173/` 的“我的 - 设置 - AI 接入设置”中测试。
+
+### 本轮改动文件
+- src/pages/Home.tsx
+- docs/interface_cache.md
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- `C:\nvm4w\nodejs\pnpm.CMD lint` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD build` 通过，Vite 仅提示 chunk size warning
+- 浏览器实测开关轨道为 56x32，圆点为 24x24；开启状态上下内边距各 4px、右侧内边距 4px、垂直圆心偏差 0
+- 浏览器实测关闭状态稳定后左侧内边距 4px、上下内边距各 4px、垂直圆心偏差 0
+- `C:\nvm4w\nodejs\pnpm.CMD verify:codex-log` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD verify:answer` 通过，Vite 仅提示 chunk size warning
+
+## 2026-05-17 16:26:10 CST (+0800)
+
+### 用户输入
+PLEASE IMPLEMENT THIS PLAN: 修复同一聊天安排候选拆分。加强短确认归一化，固定用原始安排消息生成 `semanticKey`，保存层增加同会话兜底合并，确保“安排提问 + 简短确认/改期确认”只显示一条“可能是安排”候选。
+
+### AI 最终输出
+已实现同一聊天安排候选合并修复：短确认识别现在会去掉常见标点和尾部语气词，覆盖“能的、能、能来、可以来、行的、好呀、没问题呀、ok的、OK、okay”等表达；短确认只在测试聊天上下文中回溯，普通快记不受影响。候选草稿继续使用原始安排消息生成 `title/sourceRef/semanticKey`，确认回复和改期消息改为中文备注。保存层新增同会话近似合并和读取时去重：`semanticKey` 相同直接合并，同一会话里短确认候选与原始安排候选也会合并，标题和来源优先保留原始安排消息，AI 结果也沿用同一合并逻辑。
+
+### 本轮改动文件
+- src/pages/Home.tsx
+- src/data/arrangements.ts
+- docs/interface_cache.md
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- `C:\nvm4w\nodejs\pnpm.CMD lint` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD build` 通过，Vite 仅提示 chunk size warning
+- `rg` 扫描主要源码与接口缓存，未再命中明显乱码片段
+- `git diff --check` 通过，仅提示工作区文件未来可能被 Git 转为 CRLF
+- `C:\nvm4w\nodejs\pnpm.CMD verify:codex-log` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD verify:answer` 通过，Vite 仅提示 chunk size warning
+
+## 2026-05-17 18:53:13 CST (+0800)
+
+### 用户输入
+我填了 Base URL 和 API Key 但是好像没连上去，请自测 AI 连接逻辑。
+
+### AI 最终输出
+已自测 AI 连接链路：设置保存使用 `arkme-demo.aiApiSettings`，`isAiApiConfigured()` 会检查 enabled、Base URL、API Key、model；识别请求会发送到 `${baseUrl}/responses` 并携带 `Authorization: Bearer ...`。本地环境访问 `https://api.openai.com` 报“无法连接到远程服务器”，无法验证真实 Key 或 OpenAI 返回，但已修复一个高概率配置坑：`getResponsesEndpoint()` 现在同时支持填写 `https://api.openai.com/v1` 和 `https://api.openai.com/v1/responses`，不会再拼出 `/responses/responses`。同时为 fetch 失败增加了更明确的网络/CORS/Base URL 不可达提示。
+
+### 本轮改动文件
+- src/services/arrangementAi.ts
+- docs/interface_cache.md
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- 本地 mock 验证 Base URL 归一化：`/v1`、`/v1/`、`/v1/responses`、`/v1/responses/` 均指向单一 `/responses`
+- 远程连通性检查：当前环境访问 `https://api.openai.com` 失败，无法连接到远程服务器
+- `C:\nvm4w\nodejs\pnpm.CMD lint` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD build` 通过，Vite 仅提示 chunk size warning
+- `C:\nvm4w\nodejs\pnpm.CMD verify:codex-log` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD verify:answer` 通过，Vite 仅提示 chunk size warning
+
+## 2026-05-17 20:16:23 CST (+0800)
+
+### 用户输入
+修复一下对话列表中的乱码
+
+### AI 最终输出
+已修复对话列表中的历史乱码展示：新增共享的 AI 对话展示清洗工具，检测到早期错误编码或连续问号记录时，不再把原始乱码直接展示在侧边栏预览、AI 对话气泡和全部记录流里，而是显示干净的轮次说明和折叠提示；原始 `src/data/aiConversationLog.ts` 历史数据保持不变，避免破坏既有迭代记录。可在移动端 Demo 入口 `http://127.0.0.1:5173/` 打开侧边栏和“和AI编程工具对话”查看。
+
+### 本轮改动文件
+- src/lib/aiConversationDisplay.ts
+- src/pages/Home.tsx
+- src/pages/Records.tsx
+- docs/interface_cache.md
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- `C:\nvm4w\nodejs\pnpm.CMD lint` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD build` 通过，Vite 仅提示 chunk size warning
+- `C:\nvm4w\nodejs\pnpm.CMD verify:codex-log` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD verify:answer` 通过，Vite 仅提示 chunk size warning
+
+## 2026-05-17 18:26:59 CST (+0800)
+
+### 用户输入
+PLEASE IMPLEMENT THIS PLAN: AI 自动填充最终实施计划。AI 基于同一会话上下文生成内容、时间、地点、相关人和备注，写入候选队列并复用确认 Sheet；候选卡新标签复用安排页 `StatusPill` 胶囊风格，与设置页状态标签统一。
+
+### AI 最终输出
+已实现 AI 自动填充最终计划的关键改造：`src/services/arrangementAi.ts` 已重写为干净中文提示词和错误文案，AI 输入上下文包含当前日期、来源、原始消息、本地候选标题、本地时间草稿和上下文备注；结构化输出继续写入 `title/timeDraft/location/people/note/confidence/reason`，并把 `timeDraft` schema 改为固定对象以提升兼容性。安排候选卡已去掉“AI 判断：有安排 / 安排内容”二级展示，改为直接显示 AI 总结标题，AI 建议和来源继续复用现有 `StatusPill` 胶囊样式。确认 Sheet 仍复用 `getEditorFormFromCandidate()` 自动预填内容、时间、地点、相关人和备注。
+
+### 本轮改动文件
+- src/services/arrangementAi.ts
+- src/pages/Arrangements.tsx
+- docs/interface_cache.md
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- `C:\nvm4w\nodejs\pnpm.CMD lint` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD build` 通过，Vite 仅提示 chunk size warning
+- `rg` 扫描 AI 服务、安排页和接口缓存，未再命中明显乱码或旧候选标题文案
+- `git diff --check` 通过，仅提示工作区文件未来可能被 Git 转为 CRLF
+- `C:\nvm4w\nodejs\pnpm.CMD verify:codex-log` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD verify:answer` 通过，Vite 仅提示 chunk size warning
+
+## 2026-05-17 18:13:06 CST (+0800)
+
+### 用户输入
+给 AI 识别自动分析任务，要求能够智能填充内容、时间、地点、相关人和备注，生成一份规划案 Markdown。
+
+### AI 最终输出
+已生成 `docs/arrangements-ai-auto-fill-recognition-plan.md`，规划 AI 识别自动填充安排信息的实现方案：AI 基于同一聊天上下文输出结构化 JSON，自动填充内容、`timeDraft`、地点、相关人、备注、可信度和理由；AI 结果作为候选主数据，本地规则负责上下文回溯、`semanticKey`、失败兜底和去重合并；确认 Sheet 继续由用户确认后才创建正式安排。另修正 `src/data/aiConversationLog.ts` 中上一轮重复的 16:21 记录。
+
+### 本轮改动文件
+- docs/arrangements-ai-auto-fill-recognition-plan.md
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- `rg` 确认规划案 Markdown 中中文标题和关键字段内容正常
+- `git diff --check` 通过，仅提示工作区文件未来可能被 Git 转为 CRLF
+- `C:\nvm4w\nodejs\pnpm.CMD verify:codex-log` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD verify:answer` 通过，Vite 仅提示 chunk size warning
+
+## 2026-05-17 16:13:31 CST (+0800)
+
+### 用户输入
+PLEASE IMPLEMENT THIS PLAN: AI 开启时生成完整安排总结计划。扩展 AI 识别结果为 `{ hasArrangement, title, timeDraft, location, people, note, confidence, reason }`；AI 开启时基于同一会话上下文总结谁、什么时间、在哪里、做什么和备注；候选和确认 Sheet 预填时间、地点、相关人、备注，并继续按 `semanticKey = conversationId + 原始安排消息 uid` 合并同一安排。
+
+### AI 最终输出
+已实现 AI 开启时生成完整安排总结：AI 识别服务现在要求返回标题、结构化时间草稿、地点、相关人、备注、可信度和理由；识别入口会先用本地规则回溯同会话原始安排、确认回复和改期消息，生成稳定 `semanticKey` 与上下文草稿，再把该上下文交给 AI 总结，而不是只分析当前短回复。候选数据层新增 `location` 和 `people`，AI 候选保存与合并时会优先更新标题、时间、地点、相关人和备注；安排确认 Sheet 会从候选预填时间、地点、相关人和备注。同一安排的确认回复或改期回复继续合并到同一条“可能是安排”，AI 失败或未启用时仍走本地规则兜底。同时修复安排页今日数量处残留乱码。
+
+### 本轮改动文件
+- src/services/arrangementAi.ts
+- src/data/arrangements.ts
+- src/pages/Home.tsx
+- src/pages/Arrangements.tsx
+- docs/interface_cache.md
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- `rg` 扫描主要源码与接口缓存，未再命中明显乱码片段
+- `git diff --check` 通过，仅提示工作区文件未来可能被 Git 转为 CRLF
+- `C:\nvm4w\nodejs\pnpm.CMD lint` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD build` 通过，Vite 仅提示 chunk size warning
+- `C:\nvm4w\nodejs\pnpm.CMD verify:codex-log` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD verify:answer` 通过，Vite 仅提示 chunk size warning
+## 2026-05-17 20:22:26 CST (+0800)
+
+### 用户输入
+现在还是在跑本地的逻辑，你把 base url 和 API 都存到本地可以解决这个问题吗，或者是你做一个快速扫描的日志来定位错误在哪。
+
+### AI 最终输出
+已输出《AI 连接诊断与快速扫描日志计划》：确认 `baseUrl`、`apiKey`、`model` 已保存在浏览器 `localStorage`，继续本地保存本身不能解决仍跑本地逻辑的问题；建议新增快速扫描诊断日志，记录配置检查、请求发出、响应成功、HTTP 错误、网络/CORS 错误、解析失败和本地回退，并在 AI 设置页显示最近诊断记录，且不保存完整 API Key。
+
+### 本轮改动文件
+- 无代码改动
+
+### 验证结果
+- 规划阶段，未修改代码
+
+## 2026-05-17 20:28:46 CST (+0800)
+
+### 用户输入
+PLEASE IMPLEMENT THIS PLAN: AI 连接诊断与快速扫描日志计划。新增本地诊断日志，记录配置检查、请求、成功、HTTP 错误、网络/CORS 错误、解析失败和本地回退；强化 AI 请求错误可观测性；修复快速扫描静默回退；在 AI 设置页显示最近诊断日志且不暴露完整 API Key。
+
+### AI 最终输出
+已实现 AI 连接诊断与快速扫描日志：新增浏览器本地环形诊断日志，记录单条识别和快速扫描的请求阶段、endpoint、model、API Key 是否存在及尾号、耗时、HTTP 状态、错误摘要、候选 ID 和本地回退状态；AI 服务现在会区分未配置、网络/CORS、HTTP、解析和空输出错误，并读取非 2xx 响应短错误体。快速扫描不再静默回退，会统计 AI 成功、失败和本地回退数量；AI 设置页新增“识别诊断日志”面板，复用现有胶囊与 surface 风格，并提供清空日志按钮。
+
+### 本轮改动文件
+- src/data/aiRecognitionDiagnostics.ts
+- src/services/arrangementAi.ts
+- src/pages/Home.tsx
+- docs/interface_cache.md
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- `C:\nvm4w\nodejs\pnpm.CMD lint` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD build` 通过，Vite 仅提示 chunk size warning
+- `git diff --check` 通过，仅提示工作区文件未来可能被 Git 转为 CRLF
+
+## 2026-05-17 20:35:27 CST (+0800)
+
+### 用户输入
+网络/CORS 诊断日志显示浏览器直连 `https://api.imgwwo.top/v1/responses` 失败并回退本地规则，要求修复问题。
+
+### AI 最终输出
+已输出《AI 识别 CORS 修复计划》：确认 `Failed to fetch` 是浏览器直连第三方 Base URL 的 CORS/预检问题，规划将前端 AI 识别改为同源请求 `/api/arrangement-recognition`，由现有 Vite/Node middleware 读取前端传入或环境变量中的 Base URL、API Key、Model 后转发到 `/responses`；设置页继续保留本地配置，诊断日志改为展示浏览器同源请求和代理目标。
+
+### 本轮改动文件
+- 无代码改动
+
+### 验证结果
+- 规划阶段，未修改代码
+
+## 2026-05-17 22:09:27 CST (+0800)
+
+### 用户输入
+PLEASE IMPLEMENT THIS PLAN: AI 候选备注一句话总结计划。将候选备注从“来源/改期/确认”的多段拼接改成一句自然语言总结，覆盖什么时候、谁要用户做什么、用户回复什么；继续跟随当前语言；AI prompt 和保存清洗都收敛成一句。
+
+### AI 最终输出
+已完成候选备注一句话总结：本地 fallback 的 `formatArrangementCandidateNote()` 现在组合时间草稿、来源人、安排文本和用户回复，输出一句自然语言摘要，不再拼接“来自/改期/已确认”等多段标签；`sanitizeArrangementCandidateNote()` 会把 AI 返回或旧缓存备注压缩成第一句有效摘要。AI 代理 prompt 已改为强制 `note` 只写一句，结构覆盖“什么时候、谁要用户做什么、用户回复什么”，并禁止来源、理由、置信度、内部字段和多条清单。备注仍跟随当前语言设置。
+
+### 本轮改动文件
+- src/data/arrangements.ts
+- src/pages/Home.tsx
+- server/arrangementRecognitionProxy.ts
+- docs/interface_cache.md
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- `C:\nvm4w\nodejs\pnpm.CMD lint` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD build` 通过，Vite 仅提示 chunk size warning
+- `git diff --check` 通过，仅提示工作区文件未来可能被 Git 转为 CRLF
+- `C:\nvm4w\nodejs\pnpm.CMD verify:codex-log` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD verify:answer` 通过，Vite 仅提示 chunk size warning
+
+## 2026-05-17 21:04:14 CST (+0800)
+
+### 用户输入
+PLEASE IMPLEMENT THIS PLAN: AI 候选备注跟随语言设置计划。备注跟随当前 `resolvedLocale`；AI 识别请求传递 `locale/languageName`；代理 prompt 要求 `note` 使用当前语言且不含内部术语；本地规则备注多语言化；保存和展示前清洗 `Source`、`Confirmation reply`、`Reschedule request` 等技术标签。
+
+### AI 最终输出
+已完成 AI 候选备注语言化：本地规则备注现在根据应用当前语言生成，简体中文、繁体中文、英文、阿拉伯语分别输出对应的“来自/已确认/改期”短句，其他语言使用英文兜底；AI 识别请求会携带 `locale` 和 `languageName`，代理 prompt 明确要求 `note` 使用当前语言且不得包含 `Source`、`Confirmation reply`、`sourceRef`、`draft`、`context` 等内部术语。候选保存层新增备注清洗，AI 返回或旧缓存里的技术标签会被替换/移除，候选卡和确认 Sheet 使用清洗后的用户可读备注。同时接入已有 `translationAdditions` 到翻译表，修复其未使用导致的 lint/build 阻塞。
+
+### 本轮改动文件
+- src/data/arrangements.ts
+- src/pages/Home.tsx
+- src/services/arrangementAi.ts
+- server/arrangementRecognitionProxy.ts
+- src/settings/preferences.ts
+- docs/interface_cache.md
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- `C:\nvm4w\nodejs\pnpm.CMD lint` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD build` 通过，Vite 仅提示 chunk size warning
+- `C:\nvm4w\nodejs\pnpm.CMD verify:codex-log` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD verify:answer` 通过，Vite 仅提示 chunk size warning
+
+## 2026-05-17 20:42:49 CST (+0800)
+
+### 用户输入
+PLEASE IMPLEMENT THIS PLAN: AI 识别 CORS 修复计划。将浏览器直连第三方 `/responses` 改为同源 `/api/arrangement-recognition`，由 Vite/Node middleware 使用设置页传入或环境变量中的 Base URL、API Key、Model 转发；升级代理完整自动填充 schema；诊断日志显示浏览器请求和代理目标；保留本地兜底。
+
+### AI 最终输出
+已完成 AI 识别 CORS 修复：前端 `recognizeArrangementCandidate()` 现在只请求同源 `/api/arrangement-recognition`，不再浏览器直连第三方 Base URL，也不再在浏览器请求头携带 `Authorization`；请求体携带设置页保存的 Base URL、API Key 和 Model，由 Vite/Node 代理转发到目标 `/responses`。代理已升级为完整自动填充 schema，返回 `title/timeDraft/location/people/note/confidence/reason`，并在 OpenAI/兼容服务非 2xx 时返回状态码和短错误体。诊断日志现在区分“浏览器：/api/arrangement-recognition”和“代理目标：.../responses”，快速扫描仍保留本地规则兜底。
+
+### 本轮改动文件
+- src/services/arrangementAi.ts
+- server/arrangementRecognitionProxy.ts
+- src/data/aiRecognitionDiagnostics.ts
+- src/pages/Home.tsx
+- docs/interface_cache.md
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- `C:\nvm4w\nodejs\pnpm.CMD lint` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD build` 通过，Vite 仅提示 chunk size warning
+- `C:\nvm4w\nodejs\pnpm.CMD verify:codex-log` 通过
+- `C:\nvm4w\nodejs\pnpm.CMD verify:answer` 通过，Vite 仅提示 chunk size warning
+
+## 2026-05-17 20:33:57 CST (+0800)
+
+### 用户输入
+PLEASE IMPLEMENT THIS PLAN: 全量恢复乱码修复计划
+
+### AI 最终输出
+已实施全量乱码恢复：项目规则文档、AGENTS、验证脚本和源码经真实 UTF-8 扫描确认正常；src/data/aiConversationLog.ts 和当前候选人 Markdown 日志中可由 GBK/UTF-8 误解码还原的历史记录已批量恢复，并用 Git 中干净的旧记录按时间戳覆盖可对照轮次。上一轮新增的“隐藏乱码”展示兜底已移除，Home.tsx 和 Records.tsx 重新直接展示真实日志内容；接口缓存中已删除对应临时展示清洗工具条目。
+
+### 本轮改动文件
+- src/data/aiConversationLog.ts
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/pages/Home.tsx
+- src/pages/Records.tsx
+- docs/interface_cache.md
+- src/lib/aiConversationDisplay.ts
+
+### 验证结果
+- 已用 Node 按真实 UTF-8 内容扫描 AGENTS、docs、src、scripts、server、配置文件中的典型乱码
+- 后续执行 C:\nvm4w\nodejs\pnpm.CMD lint、build、verify:codex-log、verify:answer
+
+## 2026-05-17 20:43:21 CST (+0800)
+
+### 用户输入
+我发现切换语言的时候新增加的安排页面和API设置页都没有做多语言适配，现在我需要你先阅读现有代码,写一份适配多语言md
+
+### AI 最终输出
+已阅读现有多语言机制、安排页和 AI 接入设置页实现，并新增 `docs/arrangements-and-ai-settings-i18n-plan.md`。方案梳理了当前硬编码文案范围、推荐新增的 `arrangements.*` / `aiSettings.*` / `recordDetail.arrangement.*` 翻译 key、实施顺序、数据层边界和验证清单；同时在 `docs/interface_cache.md` 记录了可复用的 `PreferencesProvider/usePreferences/t` 多语言接口，便于后续实现直接复用现有 i18n 机制。
+
+### 本轮改动文件
+- docs/arrangements-and-ai-settings-i18n-plan.md
+- docs/interface_cache.md
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- 已阅读 `docs/candidate-rules.md`、`src/settings/preferences.ts`、`src/pages/Arrangements.tsx`、`src/pages/Home.tsx`、`src/components/RecordDetailSheet.tsx`、`src/data/arrangements.ts`、`src/services/arrangementAi.ts`
+- `C:\nvm4w\nodejs\pnpm.CMD verify:answer` 通过（包含 verify:codex-log）
+
+## 2026-05-17 20:57:47 CST (+0800)
+
+### 用户输入
+备注最好能根据用户选择语言来输出。
+
+### AI 最终输出
+已输出《AI 候选备注跟随语言设置计划》：备注语言跟随应用 `resolvedLocale`，AI 识别请求向代理传递 `locale/languageName` 并约束 `note` 使用当前语言且不包含内部术语；本地规则新增轻量多语言备注格式化，至少覆盖简体中文、繁体中文、英文和阿拉伯语，其他语言使用英文兜底；保存和展示前清洗 `Source`、`Confirmation reply`、`Reschedule request` 等技术标签。
+
+### 本轮改动文件
+- 无代码改动
+
+### 验证结果
+- 规划阶段，未修改代码
+
+
+## 2026-05-17 21:18:00 CST (+0800)
+
+### 用户输入
+PLEASE IMPLEMENT THIS PLAN: # 多语言适配最终实施计划
+
+把「安排」页和「AI 接入设置」页完整接入现有 usePreferences()/t() 多语言体系；新增 arrangements.*、aiSettings.*、recordDetail.arrangement.* 翻译 key；抽出 MetaPill 统一标签、状态胶囊和诊断阶段标签；用户数据不迁移；运行 lint/build/verify。
+
+### AI 最终输出
+已实现多语言适配：t() 支持 {value} 插值并接入新增 arrangements.*、aiSettings.*、recordDetail.arrangement.* 翻译 key；安排页标题、搜索、筛选、空状态、候选、卡片、详情和编辑 Sheet 均改为当前语言渲染；AI 接入设置页、快速扫描状态、诊断日志和阶段标签接入 t()，诊断时间使用 resolvedLocale；快记详情和全屏详情的安排入口复用同一组翻译 key。新增 MetaPill 作为统一胶囊组件，用于安排状态/来源、AI 设置状态和诊断阶段。
+
+### 本轮改动文件
+- src/settings/preferences.ts
+- src/components/MetaPill.tsx
+- src/pages/Arrangements.tsx
+- src/pages/Home.tsx
+- src/components/RecordDetailSheet.tsx
+- src/components/RecordFullDetailScreen.tsx
+- docs/interface_cache.md
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- C:\nvm4w\nodejs\pnpm.CMD lint 通过
+- C:\nvm4w\nodejs\pnpm.CMD build 通过，Vite 仅提示 chunk size warning
+- C:\nvm4w\nodejs\pnpm.CMD verify:codex-log 通过
+- C:\nvm4w\nodejs\pnpm.CMD verify:answer 通过，Vite 仅提示 chunk size warning
+
+## 2026-05-17 22:05:00 CST (+0800)
+
+### 用户输入
+备注的杂项太多了，直接总结成一句话，要求覆盖什么时候谁要用户做什么，用户回复什么就可以了。
+
+### AI 最终输出
+已输出《AI 候选备注一句话总结计划》：将候选备注从多段“来源/改期/确认”拼接改成一句自然语言摘要，只覆盖什么时候、谁要用户做什么、用户回复什么；备注继续跟随应用语言设置，AI prompt 约束 `note` 必须是一句话，本地 fallback 和旧缓存清洗也收敛成一句。
+
+### 本轮改动文件
+- 无代码改动
+
+### 验证结果
+- 规划阶段，未修改代码
+
+## 2026-05-17 22:18:00 CST (+0800)
+
+### 用户输入
+检查一下现在有没有例如多个用户在讨论同一个事然后AI关联到同一个安排上的机制还有新的对话好像没有自动识别的机制，如果没有则先阅读现有代码,然后写一份md
+
+### AI 最终输出
+已检查现有代码并确认：当前只有同一会话内“原始安排消息 + 简短确认/改期回复”的基础合并能力，没有真正的多人讨论事件级归并机制；新消息创建后也不会自动触发 AI 识别，当前主要依赖手动单条识别和快速扫描。我梳理了可落地的规划草案，建议新增会话级识别上下文、事件级 semanticKey、候选多来源 sourceRefs 和新消息 debounce 自动识别队列。
+
+### 本轮改动文件
+- 无代码改动
+
+### 验证结果
+- 已阅读 `src/pages/Home.tsx`、`src/data/arrangements.ts`、`src/types/arrangement.ts`、`src/data/testConversations.ts`
+- 分析阶段，未运行构建命令
+
+## 2026-05-17 22:23:45 CST (+0800)
+
+### 用户输入
+写一份md
+
+### AI 最终输出
+已新增 `docs/arrangement-thread-auto-recognition-plan.md`，整理多人同一安排关联与新消息自动识别方案；同时补充 `docs/interface_cache.md` 中候选来源边界记录，并按项目规则补齐上一轮分析记录到个人 Markdown 日志和 `src/data/aiConversationLog.ts`。
+
+### 本轮改动文件
+- docs/arrangement-thread-auto-recognition-plan.md
+- docs/interface_cache.md
+- docs/codex-logs/candidate-王俊杰-local-20260516-155105-manual.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- 待执行 `C:\nvm4w\nodejs\pnpm.CMD verify:codex-log`
+- 待执行 `C:\nvm4w\nodejs\pnpm.CMD verify:answer`
